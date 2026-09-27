@@ -1,0 +1,15 @@
+# Runtime / dependency
+node_modules/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Env & log
+.env
+.env.*
+*.log
+logs/
+
+# OS
+.DS_Store
