@@ -149,7 +149,7 @@ async function sendCallback(serverTaskId: any, status: string, exitCode: number,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         task_id: serverTaskId,
-        agent: "antigravity-worker",
+        agent: "agent-hub",
         status: status,
         exit_code: exitCode,
         output_tail: outputTail,
