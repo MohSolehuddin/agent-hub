@@ -3,5 +3,10 @@
   "description": "Local hub: pull agent tasks from a server, run a CLI agent headlessly, report results back",
   "dependencies": {
     "elysia": "^1.4.30"
+  },
+  "scripts": {
+    "start": "bun runner.ts",
+    "test": "bun test",
+    "mock": "bun scripts/mock-server.ts"
   }
 }
