@@ -9,13 +9,15 @@ Hub lokal untuk menjalankan **CLI agent apa pun** (mis. Antigravity `agy`, Claud
 ## 🌟 Fitur Utama
 1. **Sistem Antrean (Queue) via SQLite**: Mencegah *race condition* atau agen berjalan tumpang tindih. Jika ada 10 perintah berbarengan dari server, sistem ini akan mengeksekusinya satu demi satu secara rapi.
 2. **Dashboard UI Interaktif**: Disediakan UI berbasis web (Vue.js + Tailwind) untuk memantau status setiap tugas (PENDING, RUNNING, SUCCESS, FAILED) dan melihat log eksekusi (apa saja yang dilakukan AI).
-3. **Pemisahan Konteks (Decoupling)**: Aplikasi server utama Anda tidak perlu tahu bagaimana cara kerja `agy`. Server cukup memasang endpoint `GET /api/tasks/pending`, dan runner ini yang akan mengeksekusi sisanya.
+3. **Verifikasi Sebelum Lapor Sukses**: `agy` exit 0 **tidak** dianggap sukses. Worker menjalankan gate repo (build/test) dulu; kalau gate merah → status `FAILED`. Repo tanpa gate → `UNVERIFIED` (bukan sukses palsu).
+4. **Pemisahan Konteks (Decoupling)**: server cukup menyediakan endpoint klaim + callback; tidak perlu tahu cara kerja `agy`. Worker yang menjalankan sisanya.
 
 ## 📁 Struktur File
-- `db.ts` - Konfigurasi dan inisialisasi tabel SQLite menggunakan Bun API.
-- `runner.ts` - *Core logic*. Terdapat 2 *thread* utama (Fetcher dan Worker), serta Web Server API untuk melayani UI.
+- `runner.ts` - loop klaim → eksekusi → gate → callback, plus server Elysia (dashboard + `/api/health`).
+- `logic.ts` - logika murni: deteksi gate repo, rotasi model, deteksi kuota, keputusan verdict — **ada testnya** (`logic.test.ts`).
+- `db.ts` - antrean lokal SQLite (`bun:sqlite`) + migrasi ringan.
+- `scripts/mock-server.ts` - server tiruan Personal OS untuk uji E2E.
 - `public/index.html` - *Frontend Dashboard* untuk monitoring.
-- `elysia_server.ts` - *(Hanya untuk testing)* Mock server utama.
 
 ## 🚀 Cara Menjalankan (Integrasi dengan Project)
 
@@ -25,18 +27,28 @@ Pastikan Anda sudah menginstall Bun. Jika belum ada `elysia`, install dengan:
 bun add elysia
 ```
 
-### 2. Konfigurasi Endpoint Server Eksternal
-Di dalam file `runner.ts`, ubah baris ini sesuai dengan URL server backend aplikasi Anda yang sebenarnya (Server yang akan diurus oleh tim / project lain):
-```typescript
-const SERVER_URL = process.env.SERVER_URL || "http://localhost:3000";
-```
-*Catatan: Pastikan server tersebut memiliki endpoint `GET /api/tasks/pending` yang mereturn JSON `{ has_task: true, task: "prompt..." }`.*
+### 2. Konfigurasi (env) — tidak perlu edit kode
+
+| Env | Default | Guna |
+|---|---|---|
+| `SERVER_URL` | `http://localhost:3000` | base URL Personal OS |
+| `AGENT_WORKER_TOKEN` | *(kosong)* | bila diset → dikirim sebagai header `X-Worker-Token`, **wajib** cocok dengan server (fail-closed) |
+| `AGENT_NAME` | `agent-hub` | nilai `agent` pada payload & callback |
+| `AGY_MODELS` | `gemini-3.7-flash-medium gemini-3.6-flash-medium gemini-3.8-flash-medium` | urutan rotasi saat kuota model habis |
+| `AGY_PRINT_TIMEOUT` | `15m` | nilai `--print-timeout` |
+| `DEFAULT_TIMEOUT_MIN` | `30` | timeout default bila payload tidak mengisi `timeout_minutes` |
+| `POLL_MS` | `10000` | interval klaim tugas |
+| `PORT` | `4000` | dashboard lokal |
+
+Server harus punya `POST /api/agent-dispatcher/claim` (ambil + kunci tugas) dan
+`POST /api/agent-dispatcher/callback` (terima hasil) — keduanya sudah tersedia di personal-tools.
 
 ### 3. Jalankan Agent Runner
-Buka terminal dan jalankan:
 ```bash
-bun run runner.ts
+bun install
+bun run start      # = bun runner.ts
 ```
+Dashboard: **http://localhost:4000** · health: `GET /api/health`
 
 Sistem akan langsung:
 1. Membuat file database `agent_tasks.sqlite` (jika belum ada).
