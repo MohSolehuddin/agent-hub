@@ -8,6 +8,7 @@ node_modules/
 # Env & log
 .env
 .env.*
+!.env.hub.example
 *.log
 logs/
 
