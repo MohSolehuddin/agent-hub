@@ -8,7 +8,7 @@ Hub lokal untuk menjalankan **CLI agent apa pun** (mis. Antigravity `agy`, Claud
 
 ## 🌟 Fitur Utama
 1. **Sistem Antrean (Queue) via SQLite**: Mencegah *race condition* atau agen berjalan tumpang tindih. Jika ada 10 perintah berbarengan dari server, sistem ini akan mengeksekusinya satu demi satu secara rapi.
-2. **Dashboard UI Interaktif**: Disediakan UI berbasis web (Vue.js + Tailwind) untuk memantau status setiap tugas (PENDING, RUNNING, SUCCESS, FAILED) dan melihat log eksekusi (apa saja yang dilakukan AI).
+2. **Dashboard UI Interaktif**: Disediakan UI berbasis web (Vue.js + Tailwind) untuk memantau status setiap tugas (PENDING, RUNNING, COMPLETED, FAILED, UNVERIFIED, TIMED_OUT) dan melihat log eksekusi (apa saja yang dilakukan AI).
 3. **Verifikasi Sebelum Lapor Sukses**: `agy` exit 0 **tidak** dianggap sukses. Worker menjalankan gate repo (build/test) dulu; kalau gate merah → status `FAILED`. Repo tanpa gate → `UNVERIFIED` (bukan sukses palsu).
 4. **Pemisahan Konteks (Decoupling)**: server cukup menyediakan endpoint klaim + callback; tidak perlu tahu cara kerja `agy`. Worker yang menjalankan sisanya.
 
@@ -59,3 +59,21 @@ Sistem akan langsung:
 Buka browser Anda dan navigasikan ke: **http://localhost:4000**
 
 Anda akan melihat antarmuka monitoring secara real-time. Jika Anda mengklik tulisan **"Lihat Log"** pada tugas yang sudah selesai, sebuah jendela popup bergaya terminal akan muncul memperlihatkan semua aksi yang dilakukan AI.
+
+## 🧪 Uji E2E (tanpa kuota agy)
+
+`scripts/e2e.sh` menjalankan mock-server + runner dengan `agy` tiruan di PATH:
+```bash
+MODE=ok  bash scripts/e2e.sh   # gate hijau -> callback COMPLETED
+MODE=red bash scripts/e2e.sh   # exit 0 tapi gate merah -> callback FAILED
+```
+Keduanya mencetak `PASS`/`FAIL` dan menaruh callback di `/tmp/ah-e2e/callback.jsonl`.
+
+## ⚙️ Jalankan sebagai service (systemd --user)
+
+```bash
+bash scripts/install-service.sh     # pasang ~/.config/systemd/user/agent-hub.service
+systemctl --user status agent-hub   # cek status
+journalctl --user -u agent-hub -f   # log
+```
+Konfigurasi lewat `.env.hub` (lihat `.env.hub.example`): `SERVER_URL`, opsional `AGENT_WORKER_TOKEN`. Karena `Linger=yes`, service tetap hidup walau user logout.

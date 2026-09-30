@@ -1,0 +1,18 @@
+[Unit]
+Description=Agent Hub Worker (agy runner)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__HUB__
+EnvironmentFile=-__HUB__/.env.hub
+Environment=PATH=/home/msytc/.local/bin:/home/msytc/.bun/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/msytc/.bun/bin/bun runner.ts
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:__HUB__/logs/service.log
+StandardError=append:__HUB__/logs/service.log
+
+[Install]
+WantedBy=default.target
