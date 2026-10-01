@@ -143,3 +143,13 @@ export function summarizeGateOutput(cmd: string, ok: boolean, output: string, ma
   const tail = (picked.length > 0 ? picked : lines.slice(-3)).slice(-maxLines);
   return `[${ok ? "GATE OK" : "GATE GAGAL"}] $ ${cmd}\n${tail.join("\n")}`;
 }
+
+export const CLAIM_RETRY_DELAYS = [1000, 2000, 4000];
+
+/**
+ * Cek apakah status HTTP tergolong kegagalan gateway / server sementara
+ * yang layak di-retry (502, 503, 504). Status 4xx (mis. 401) JANGAN di-retry.
+ */
+export function isRetryableHttpStatus(status: number): boolean {
+  return status === 502 || status === 503 || status === 504;
+}

@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { detectGate, pickModel, isQuotaError, parseResetSeconds, verdict, summarizeGateOutput } from "./logic";
+import {
+  detectGate,
+  pickModel,
+  isQuotaError,
+  parseResetSeconds,
+  verdict,
+  summarizeGateOutput,
+  CLAIM_RETRY_DELAYS,
+  isRetryableHttpStatus,
+} from "./logic";
 
 const io = (files: string[], json?: Record<string, any>) => ({
   exists: (p: string) => files.includes(p),
@@ -109,3 +118,29 @@ describe("summarizeGateOutput", () => {
     expect(s).toContain("FAIL TestFoo");
   });
 });
+
+describe("claim retry logic", () => {
+  test("CLAIM_RETRY_DELAYS memakai jeda 1s, 2s, 4s (maks 3 percobaan ulang)", () => {
+    expect(CLAIM_RETRY_DELAYS).toEqual([1000, 2000, 4000]);
+  });
+
+  test("isRetryableHttpStatus HANYA retry untuk HTTP 502, 503, 504", () => {
+    expect(isRetryableHttpStatus(502)).toBe(true);
+    expect(isRetryableHttpStatus(503)).toBe(true);
+    expect(isRetryableHttpStatus(504)).toBe(true);
+  });
+
+  test("isRetryableHttpStatus TIDAK retry untuk 4xx (mis. 401, 403, 404, 400)", () => {
+    expect(isRetryableHttpStatus(400)).toBe(false);
+    expect(isRetryableHttpStatus(401)).toBe(false);
+    expect(isRetryableHttpStatus(403)).toBe(false);
+    expect(isRetryableHttpStatus(404)).toBe(false);
+    expect(isRetryableHttpStatus(429)).toBe(false);
+  });
+
+  test("isRetryableHttpStatus TIDAK retry untuk 2xx / status lain", () => {
+    expect(isRetryableHttpStatus(200)).toBe(false);
+    expect(isRetryableHttpStatus(500)).toBe(false);
+  });
+});
+

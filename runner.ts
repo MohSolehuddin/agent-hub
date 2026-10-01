@@ -12,6 +12,8 @@ import {
   verdict,
   summarizeGateOutput,
   type GateSpec,
+  CLAIM_RETRY_DELAYS,
+  isRetryableHttpStatus,
 } from "./logic";
 
 const execAsync = promisify(exec);
@@ -30,6 +32,18 @@ const DEFAULT_WORKSPACE =
 const POLL_MS = Number(process.env.POLL_MS || 10000);
 const LOG_DIR = join(process.cwd(), "logs");
 
+// Preamble WAJIB untuk setiap tugas yang dikirim ke agy.
+// Tanpa ini, agy bisa melempar verifikasi ke background task lalu idle -> keluar 0
+// tanpa mengubah file apa pun, dan gate (yang tidak melihat perubahan) tetap hijau.
+const PREAMBLE = `ATURAN OPERASIONAL CLI (WAJIB, jangan dilanggar):
+- Jalankan SEMUA perintah shell (build/test/verifikasi) di FOREGROUND (blocking). JANGAN memakai background task, task async, atau tanda "&".
+- Jangan menunggu apa pun setelah menjawab; selesaikan satu turn sampai tuntas.
+- Jangan push ke remote. Jangan menghapus data/database. Jangan menyentuh file di luar lingkup tugas.
+- Bahasa laporan akhir: singkat, Indonesia.
+
+--- TUGAS ---
+`;
+
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 
 let isRunning = false;
@@ -44,30 +58,49 @@ function authHeaders(): Record<string, string> {
 
 // ---------- 1. Ambil tugas (klaim atomik dari server) ----------
 async function fetchTasksFromServer() {
-  try {
-    const res = await fetch(`${SERVER_URL}/api/agent-dispatcher/claim`, {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({ agent: AGENT_NAME }),
-    });
-    if (!res.ok) {
-      log(`[!] claim gagal: HTTP ${res.status} ${res.statusText}`);
+  for (let attempt = 0; attempt <= CLAIM_RETRY_DELAYS.length; attempt++) {
+    try {
+      const res = await fetch(`${SERVER_URL}/api/agent-dispatcher/claim`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ agent: AGENT_NAME }),
+      });
+      if (!res.ok) {
+        if (isRetryableHttpStatus(res.status) && attempt < CLAIM_RETRY_DELAYS.length) {
+          const delayMs = CLAIM_RETRY_DELAYS[attempt];
+          log(
+            `[!] claim gagal: HTTP ${res.status} ${res.statusText} -> retry ${attempt + 1}/${CLAIM_RETRY_DELAYS.length} dalam ${delayMs / 1000}s...`,
+          );
+          await new Promise((r) => setTimeout(r, delayMs));
+          continue;
+        }
+        log(`[!] claim gagal: HTTP ${res.status} ${res.statusText}`);
+        return;
+      }
+
+      const data: any = await res.json();
+      if (!data?.has_task || !data?.task) return;
+
+      const t = data.task;
+      const project = t.project_path || DEFAULT_WORKSPACE;
+      db.run(
+        `INSERT INTO tasks (task_prompt, target_project, server_task_id, server_task_ref, timeout_minutes, status)
+         VALUES (?, ?, ?, ?, ?, 'PENDING')`,
+        [t.prompt, project, t.task_id ?? null, t.task_id ?? null, Number(t.timeout_minutes) || DEFAULT_TIMEOUT_MIN],
+      );
+      log(`[⬇️] Tugas ${t.task_id} diklaim dari server (repo: ${project})`);
       return;
+    } catch (err: any) {
+      if (attempt < CLAIM_RETRY_DELAYS.length) {
+        const delayMs = CLAIM_RETRY_DELAYS[attempt];
+        log(
+          `[!] claim error: ${err?.message ?? err} -> retry ${attempt + 1}/${CLAIM_RETRY_DELAYS.length} dalam ${delayMs / 1000}s...`,
+        );
+        await new Promise((r) => setTimeout(r, delayMs));
+        continue;
+      }
+      log(`[!] claim error: ${err?.message ?? err}`);
     }
-
-    const data: any = await res.json();
-    if (!data?.has_task || !data?.task) return;
-
-    const t = data.task;
-    const project = t.project_path || DEFAULT_WORKSPACE;
-    db.run(
-      `INSERT INTO tasks (task_prompt, target_project, server_task_id, server_task_ref, timeout_minutes, status)
-       VALUES (?, ?, ?, ?, ?, 'PENDING')`,
-      [t.prompt, project, t.task_id ?? null, t.task_id ?? null, Number(t.timeout_minutes) || DEFAULT_TIMEOUT_MIN],
-    );
-    log(`[⬇️] Tugas ${t.task_id} diklaim dari server (repo: ${project})`);
-  } catch (err: any) {
-    log(`[!] claim error: ${err?.message ?? err}`);
   }
 }
 
@@ -251,7 +284,7 @@ async function processLocalTasks() {
 
     const args = [
       "-p",
-      task.task_prompt,
+      PREAMBLE + task.task_prompt,
       "--dangerously-skip-permissions",
       "--add-dir",
       targetProject,
