@@ -153,3 +153,85 @@ export const CLAIM_RETRY_DELAYS = [1000, 2000, 4000];
 export function isRetryableHttpStatus(status: number): boolean {
   return status === 502 || status === 503 || status === 504;
 }
+
+/**
+ * Parser murni untuk file *.meta (format KEY=value per baris).
+ * Aman dari eval/source, mendukung nilai dengan spasi, kutip, dan titik dua.
+ */
+export function parseMetaContent(content: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  if (!content) return result;
+
+  const lines = content.split(/\r?\n/);
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+
+    const eqIdx = line.indexOf("=");
+    if (eqIdx === -1) continue;
+
+    const key = line.slice(0, eqIdx).trim();
+    let val = line.slice(eqIdx + 1).trim();
+
+    // Hapus tanda kutip luar jika dibungkus "..." atau '...'
+    if (
+      (val.startsWith('"') && val.endsWith('"') && val.length >= 2) ||
+      (val.startsWith("'") && val.endsWith("'") && val.length >= 2)
+    ) {
+      val = val.slice(1, -1);
+    }
+
+    if (key) {
+      result[key] = val;
+    }
+  }
+
+  return result;
+}
+
+export type BacklogItem = {
+  id: string;
+  project_dir: string;
+  commit: string;
+  status: string;
+  model?: string;
+  verify?: string;
+  timeout?: string;
+};
+
+/**
+ * Tentukan status tugas backlog berdasarkan keberadaan file di done/ dan DB lokal.
+ * Prioritas:
+ * 1. Ada di subfolder done/ -> DONE
+ * 2. Ada di tabel tasks lokal -> status tabel lokal (RUNNING / COMPLETED / FAILED / dll)
+ * 3. Selain itu -> PENDING
+ */
+export function resolveBacklogStatus(opts: {
+  isDoneInSubdir: boolean;
+  localTaskStatus?: string | null;
+}): string {
+  if (opts.isDoneInSubdir) {
+    return "DONE";
+  }
+  if (opts.localTaskStatus) {
+    return opts.localTaskStatus;
+  }
+  return "PENDING";
+}
+
+/**
+ * Ekstrak item backlog terstruktur dari id, isi file meta, dan status.
+ */
+export function parseBacklogMeta(id: string, content: string, status: string): BacklogItem {
+  const meta = parseMetaContent(content);
+  return {
+    id,
+    project_dir: meta.PROJECT_DIR || meta.project_dir || "",
+    commit: meta.COMMIT || meta.commit || "",
+    status,
+    model: meta.MODEL || meta.model || "",
+    verify: meta.VERIFY || meta.verify || "",
+    timeout: meta.TIMEOUT || meta.timeout || "",
+  };
+}
+

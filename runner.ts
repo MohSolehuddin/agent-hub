@@ -14,6 +14,9 @@ import {
   type GateSpec,
   CLAIM_RETRY_DELAYS,
   isRetryableHttpStatus,
+  parseBacklogMeta,
+  resolveBacklogStatus,
+  type BacklogItem,
 } from "./logic";
 
 const execAsync = promisify(exec);
@@ -29,6 +32,7 @@ const PRINT_TIMEOUT = process.env.AGY_PRINT_TIMEOUT || "15m";
 const DEFAULT_TIMEOUT_MIN = Number(process.env.DEFAULT_TIMEOUT_MIN || 30);
 const DEFAULT_WORKSPACE =
   process.env.DEFAULT_WORKSPACE || join(process.env.HOME || "/home/msytc", "project/have-fun/personal-tools");
+const BACKLOG_DIR = process.env.BACKLOG_DIR || "/home/msytc/hermes-work/review-loop/tasks";
 const POLL_MS = Number(process.env.POLL_MS || 10000);
 const LOG_DIR = join(process.cwd(), "logs");
 
@@ -374,8 +378,74 @@ async function processLocalTasks() {
 }
 
 // ---------- 4. Dashboard & API lokal ----------
+function getBacklogTasks(): BacklogItem[] {
+  try {
+    if (!fs.existsSync(BACKLOG_DIR)) {
+      return [];
+    }
+
+    const entries = fs.readdirSync(BACKLOG_DIR, { withFileTypes: true });
+    const metaFiles = entries.filter((e) => e.isFile() && e.name.endsWith(".meta"));
+
+    if (metaFiles.length === 0) {
+      return [];
+    }
+
+    const doneDir = join(BACKLOG_DIR, "done");
+    const hasDoneDir = fs.existsSync(doneDir);
+
+    const localTasks = db.query(`SELECT id, server_task_id, server_task_ref, status FROM tasks`).all() as Array<{
+      id: number;
+      server_task_id: string | null;
+      server_task_ref: string | null;
+      status: string;
+    }>;
+
+    const statusMap = new Map<string, string>();
+    for (const t of localTasks) {
+      if (t.server_task_id) statusMap.set(t.server_task_id, t.status);
+      if (t.server_task_ref) statusMap.set(t.server_task_ref, t.status);
+      statusMap.set(String(t.id), t.status);
+    }
+
+    const items: BacklogItem[] = [];
+
+    for (const entry of metaFiles) {
+      const fileName = entry.name;
+      const id = fileName.slice(0, -5);
+      const filePath = join(BACKLOG_DIR, fileName);
+
+      let content = "";
+      try {
+        content = fs.readFileSync(filePath, "utf-8");
+      } catch {
+        continue;
+      }
+
+      const isDone =
+        hasDoneDir &&
+        (fs.existsSync(join(doneDir, fileName)) ||
+          fs.existsSync(join(doneDir, `${id}.meta`)) ||
+          fs.existsSync(join(doneDir, id)));
+
+      const localStatus = statusMap.get(id) || null;
+      const status = resolveBacklogStatus({ isDoneInSubdir: isDone, localTaskStatus: localStatus });
+
+      items.push(parseBacklogMeta(id, content, status));
+    }
+
+    items.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true, sensitivity: "base" }));
+
+    return items;
+  } catch (err: any) {
+    log(`[!] error membaca backlog dir: ${err?.message ?? err}`);
+    return [];
+  }
+}
+
 new Elysia()
   .get("/api/local-tasks", () => db.query(`SELECT * FROM tasks ORDER BY id DESC LIMIT 100`).all())
+  .get("/api/backlog", () => getBacklogTasks())
   .get("/api/health", () => ({ ok: true, agent: AGENT_NAME, models: MODELS, running: isRunning }))
   .get("/", () => Bun.file("public/index.html"))
   .listen(Number(process.env.PORT || 4000));

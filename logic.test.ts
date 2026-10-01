@@ -8,6 +8,9 @@ import {
   summarizeGateOutput,
   CLAIM_RETRY_DELAYS,
   isRetryableHttpStatus,
+  parseMetaContent,
+  resolveBacklogStatus,
+  parseBacklogMeta,
 } from "./logic";
 
 const io = (files: string[], json?: Record<string, any>) => ({
@@ -143,4 +146,92 @@ describe("claim retry logic", () => {
     expect(isRetryableHttpStatus(500)).toBe(false);
   });
 });
+
+describe("parser *.meta dan backlog logic", () => {
+  test("parseMetaContent membaca format KEY=value baris per baris", () => {
+    const raw = `
+PROJECT_DIR=/home/msytc/project/have-fun/personal-tools
+FILES=frontend/src/app/page.tsx
+TIMEOUT=900
+PRINT_TIMEOUT=15m
+MODEL=gemini-3.6-flash-medium gemini-3.8-flash-medium
+VERIFY=cd frontend && bun run build
+COMMIT=docs: correct worker location copy in dispatch UI
+`;
+    const parsed = parseMetaContent(raw);
+    expect(parsed.PROJECT_DIR).toBe("/home/msytc/project/have-fun/personal-tools");
+    expect(parsed.FILES).toBe("frontend/src/app/page.tsx");
+    expect(parsed.TIMEOUT).toBe("900");
+    expect(parsed.PRINT_TIMEOUT).toBe("15m");
+    expect(parsed.MODEL).toBe("gemini-3.6-flash-medium gemini-3.8-flash-medium");
+    expect(parsed.VERIFY).toBe("cd frontend && bun run build");
+    expect(parsed.COMMIT).toBe("docs: correct worker location copy in dispatch UI");
+  });
+
+  test("parseMetaContent mengabaikan komentar dan baris kosong", () => {
+    const raw = `
+# Ini adalah komentar
+PROJECT_DIR=/path/to/repo
+
+# Komentar lain
+COMMIT=fix: something
+`;
+    const parsed = parseMetaContent(raw);
+    expect(Object.keys(parsed)).toEqual(["PROJECT_DIR", "COMMIT"]);
+    expect(parsed.PROJECT_DIR).toBe("/path/to/repo");
+    expect(parsed.COMMIT).toBe("fix: something");
+  });
+
+  test("parseMetaContent menghapus tanda kutip luar (double quotes & single quotes)", () => {
+    const raw = `
+VERIFY="cd backend && go test ./... 2>&1 | tail -8"
+MSG='hello world: testing quotes'
+EXTRA="nested 'quote' test"
+`;
+    const parsed = parseMetaContent(raw);
+    expect(parsed.VERIFY).toBe("cd backend && go test ./... 2>&1 | tail -8");
+    expect(parsed.MSG).toBe("hello world: testing quotes");
+    expect(parsed.EXTRA).toBe("nested 'quote' test");
+  });
+
+  test("parseMetaContent menangani nilai dengan tanda sama dengan (=)", () => {
+    const raw = `CMD=bun test --filter=foo=bar`;
+    const parsed = parseMetaContent(raw);
+    expect(parsed.CMD).toBe("bun test --filter=foo=bar");
+  });
+
+  test("parseMetaContent menangani input kosong / tanpa pasangan valid", () => {
+    expect(parseMetaContent("")).toEqual({});
+    expect(parseMetaContent("   \n\n  # comment only\n")).toEqual({});
+    expect(parseMetaContent("invalid line without equals")).toEqual({});
+  });
+
+  test("resolveBacklogStatus memprioritaskan subfolder done/ -> DONE", () => {
+    expect(resolveBacklogStatus({ isDoneInSubdir: true, localTaskStatus: "RUNNING" })).toBe("DONE");
+    expect(resolveBacklogStatus({ isDoneInSubdir: true, localTaskStatus: "COMPLETED" })).toBe("DONE");
+    expect(resolveBacklogStatus({ isDoneInSubdir: true, localTaskStatus: null })).toBe("DONE");
+  });
+
+  test("resolveBacklogStatus menggunakan status tabel lokal jika ada dan belum di done/", () => {
+    expect(resolveBacklogStatus({ isDoneInSubdir: false, localTaskStatus: "RUNNING" })).toBe("RUNNING");
+    expect(resolveBacklogStatus({ isDoneInSubdir: false, localTaskStatus: "COMPLETED" })).toBe("COMPLETED");
+    expect(resolveBacklogStatus({ isDoneInSubdir: false, localTaskStatus: "FAILED" })).toBe("FAILED");
+  });
+
+  test("resolveBacklogStatus fallback ke PENDING jika tidak di done/ dan tidak ada di db lokal", () => {
+    expect(resolveBacklogStatus({ isDoneInSubdir: false, localTaskStatus: null })).toBe("PENDING");
+    expect(resolveBacklogStatus({ isDoneInSubdir: false, localTaskStatus: undefined })).toBe("PENDING");
+  });
+
+  test("parseBacklogMeta mengembalikan field minimal id, project_dir, commit, status", () => {
+    const raw = `PROJECT_DIR=/repo/app\nCOMMIT=feat: awesome feature\nMODEL=gemini-3.7-flash-medium`;
+    const item = parseBacklogMeta("PT-99", raw, "PENDING");
+    expect(item.id).toBe("PT-99");
+    expect(item.project_dir).toBe("/repo/app");
+    expect(item.commit).toBe("feat: awesome feature");
+    expect(item.status).toBe("PENDING");
+    expect(item.model).toBe("gemini-3.7-flash-medium");
+  });
+});
+
 
