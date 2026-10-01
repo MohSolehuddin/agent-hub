@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=__HUB__
 EnvironmentFile=-__HUB__/.env.hub
-Environment=PATH=/home/msytc/.local/bin:/home/msytc/.bun/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=/home/msytc/.local/bin:/home/msytc/.bun/bin:/usr/local/go/bin:/home/msytc/go/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/home/msytc/.bun/bin/bun runner.ts
 Restart=on-failure
 RestartSec=10
