@@ -47,9 +47,14 @@
                                 {{ item.commit || '-' }}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
-                                <span :class="getStatusBadgeClass(item.status)" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full">
-                                    {{ item.status }}
-                                </span>
+                                <div class="flex flex-col items-start gap-0.5">
+                                    <span :class="getStatusBadgeClass(item.status)" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full" :title="getStatusDescription(item.status)">
+                                        {{ getStatusLabel(item.status) }}
+                                    </span>
+                                    <span v-if="item.status === 'NO_CHANGES'" class="text-[11px] text-slate-500">
+                                        agy tidak mengubah file apa pun (bukan sukses, bukan gagal)
+                                    </span>
+                                </div>
                             </td>
                         </tr>
                         <tr v-if="backlog.length === 0">
@@ -83,9 +88,14 @@
                         <tr v-for="task in tasks" :key="task.id" class="hover:bg-gray-50 transition">
                             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">#{{ task.id }}</td>
                             <td class="px-6 py-4 whitespace-nowrap">
-                                <span :class="getStatusBadgeClass(task.status)" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full">
-                                    {{ task.status }}
-                                </span>
+                                <div class="flex flex-col items-start gap-0.5">
+                                    <span :class="getStatusBadgeClass(task.status)" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full" :title="getStatusDescription(task.status)">
+                                        {{ getStatusLabel(task.status) }}
+                                    </span>
+                                    <span v-if="task.status === 'NO_CHANGES'" class="text-[11px] text-slate-500">
+                                        agy tidak mengubah file apa pun (bukan sukses, bukan gagal)
+                                    </span>
+                                </div>
                             </td>
                             <td class="px-6 py-4 text-sm text-gray-500 max-w-xs truncate" :title="task.task_prompt">
                                 {{ task.task_prompt }}
@@ -112,10 +122,19 @@
         <div v-if="selectedTask" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
                 <div class="px-6 py-4 border-b flex justify-between items-center">
-                    <h3 class="text-lg font-bold">Output Log (Tugas #{{ selectedTask.id }})</h3>
+                    <div class="flex items-center gap-3">
+                        <h3 class="text-lg font-bold">Output Log (Tugas #{{ selectedTask.id }})</h3>
+                        <span :class="getStatusBadgeClass(selectedTask.status)" class="px-2.5 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full" :title="getStatusDescription(selectedTask.status)">
+                            {{ getStatusLabel(selectedTask.status) }}
+                        </span>
+                    </div>
                     <button @click="selectedTask = null" class="text-gray-400 hover:text-gray-600">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                     </button>
+                </div>
+                <div v-if="selectedTask.status === 'NO_CHANGES'" class="bg-slate-100 border-b border-slate-200 px-6 py-3 text-sm text-slate-700 flex items-start gap-2">
+                    <span class="font-semibold text-slate-800">Status NO CHANGES:</span>
+                    <span>agy tidak mengubah file apa pun (bukan sukses, bukan gagal).</span>
                 </div>
                 <div class="p-6 overflow-y-auto bg-gray-900 text-green-400 font-mono text-sm">
                     <div class="mb-4 text-white"><strong>PROMPT:</strong> {{ selectedTask.task_prompt }}</div>
@@ -168,8 +187,19 @@
                         case 'UNVERIFIED': return 'bg-amber-100 text-amber-800';
                         case 'TIMED_OUT': return 'bg-orange-100 text-orange-800';
                         case 'FAILED': return 'bg-red-100 text-red-800';
+                        case 'NO_CHANGES': return 'bg-slate-100 text-slate-700';
                         default: return 'bg-gray-100 text-gray-800';
                     }
+                },
+                getStatusLabel(status) {
+                    if (status === 'NO_CHANGES') return 'NO CHANGES';
+                    return status;
+                },
+                getStatusDescription(status) {
+                    if (status === 'NO_CHANGES') {
+                        return 'agy tidak mengubah file apa pun (bukan sukses, bukan gagal)';
+                    }
+                    return '';
                 },
                 showOutput(task) {
                     this.selectedTask = task;

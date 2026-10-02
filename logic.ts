@@ -306,3 +306,49 @@ export function resolveDashboardPath(baseDir: string): string {
   return join(baseDir, "public", "index.html");
 }
 
+/**
+ * Class badge Tailwind untuk status di dashboard.
+ */
+export function getStatusBadgeClass(status: string): string {
+  switch (status) {
+    case "PENDING":
+      return "bg-yellow-100 text-yellow-800";
+    case "RUNNING":
+      return "bg-blue-100 text-blue-800 animate-pulse";
+    case "COMPLETED":
+      return "bg-green-100 text-green-800";
+    case "SUCCESS":
+      return "bg-green-100 text-green-800";
+    case "DONE":
+      return "bg-emerald-100 text-emerald-800";
+    case "UNVERIFIED":
+      return "bg-amber-100 text-amber-800";
+    case "TIMED_OUT":
+      return "bg-orange-100 text-orange-800";
+    case "FAILED":
+      return "bg-red-100 text-red-800";
+    case "NO_CHANGES":
+      return "bg-slate-100 text-slate-700";
+    default:
+      return "bg-gray-100 text-gray-800";
+  }
+}
+
+/**
+ * Label status di dashboard (NO_CHANGES ditampilkan sebagai "NO CHANGES").
+ */
+export function getStatusLabel(status: string): string {
+  if (status === "NO_CHANGES") return "NO CHANGES";
+  return status;
+}
+
+/**
+ * Deskripsi status di dashboard.
+ */
+export function getStatusDescription(status: string): string {
+  if (status === "NO_CHANGES") {
+    return "agy tidak mengubah file apa pun (bukan sukses, bukan gagal)";
+  }
+  return "";
+}
+

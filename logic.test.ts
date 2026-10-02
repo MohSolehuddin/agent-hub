@@ -16,6 +16,9 @@ import {
   resolveDbPath,
   resolveLogDir,
   resolveDashboardPath,
+  getStatusBadgeClass,
+  getStatusLabel,
+  getStatusDescription,
 } from "./logic";
 
 const io = (files: string[], json?: Record<string, any>) => ({
@@ -367,6 +370,30 @@ describe("resolusi path lingkungan & multi-lane", () => {
 
   test("resolveDashboardPath selalu merujuk ke public/index.html di folder module", () => {
     expect(resolveDashboardPath("/opt/agent-hub")).toBe("/opt/agent-hub/public/index.html");
+  });
+});
+
+describe("format status dashboard", () => {
+  test("getStatusBadgeClass mengembalikan class badge yang sesuai", () => {
+    expect(getStatusBadgeClass("NO_CHANGES")).toBe("bg-slate-100 text-slate-700");
+    expect(getStatusBadgeClass("COMPLETED")).toBe("bg-green-100 text-green-800");
+    expect(getStatusBadgeClass("FAILED")).toBe("bg-red-100 text-red-800");
+    expect(getStatusBadgeClass("PENDING")).toBe("bg-yellow-100 text-yellow-800");
+    expect(getStatusBadgeClass("RUNNING")).toBe("bg-blue-100 text-blue-800 animate-pulse");
+    expect(getStatusBadgeClass("TIMED_OUT")).toBe("bg-orange-100 text-orange-800");
+    expect(getStatusBadgeClass("UNVERIFIED")).toBe("bg-amber-100 text-amber-800");
+    expect(getStatusBadgeClass("UNKNOWN")).toBe("bg-gray-100 text-gray-800");
+  });
+
+  test("getStatusLabel mengubah NO_CHANGES menjadi 'NO CHANGES'", () => {
+    expect(getStatusLabel("NO_CHANGES")).toBe("NO CHANGES");
+    expect(getStatusLabel("COMPLETED")).toBe("COMPLETED");
+    expect(getStatusLabel("PENDING")).toBe("PENDING");
+  });
+
+  test("getStatusDescription memberikan penjelasan untuk NO_CHANGES", () => {
+    expect(getStatusDescription("NO_CHANGES")).toBe("agy tidak mengubah file apa pun (bukan sukses, bukan gagal)");
+    expect(getStatusDescription("COMPLETED")).toBe("");
   });
 });
 
