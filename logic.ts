@@ -102,21 +102,59 @@ export function parseResetSeconds(text: string): number | null {
 
 export type Verdict = {
   ok: boolean;
-  status: "COMPLETED" | "FAILED" | "TIMED_OUT" | "UNVERIFIED";
+  status: "COMPLETED" | "FAILED" | "TIMED_OUT" | "UNVERIFIED" | "NO_CHANGES";
   reason: string;
 };
 
 /**
- * Putuskan status akhir berdasarkan exit code agy + hasil gate.
- * ATURAN PENTING: agy exit 0 TIDAK cukup — gate harus hijau, kalau tidak -> FAILED.
+ * Cek apakah baris status git merupakan noise yang perlu diabaikan (.agent-hub.json, logs/, node_modules/).
+ */
+export function isNoiseGitLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return true;
+  // Format git porcelain: "XY path" atau "XY path1 -> path2"
+  const rawPath = trimmed.slice(2).trim();
+  const pathPart = rawPath.replace(/^["']|["']$/g, "");
+  if (pathPart === ".agent-hub.json" || pathPart.endsWith("/.agent-hub.json")) return true;
+  if (pathPart === "logs" || pathPart.startsWith("logs/") || pathPart.includes("/logs/")) return true;
+  if (pathPart === "node_modules" || pathPart.startsWith("node_modules/") || pathPart.includes("/node_modules/")) return true;
+  return false;
+}
+
+/**
+ * Bandingkan status git sebelum dan sesudah eksekusi agy.
+ * Mengabaikan file noise (.agent-hub.json, logs/, node_modules/) dan file untracked yang sudah ada sebelum run.
+ */
+export function hasGitChanges(beforeStatus: string, afterStatus: string): boolean {
+  const cleanBefore = (beforeStatus || "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !isNoiseGitLine(l))
+    .sort()
+    .join("\n");
+
+  const cleanAfter = (afterStatus || "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !isNoiseGitLine(l))
+    .sort()
+    .join("\n");
+
+  return cleanBefore !== cleanAfter;
+}
+
+/**
+ * Putuskan status akhir berdasarkan exit code agy + hasil gate + deteksi perubahan file.
+ * ATURAN PENTING: agy exit 0 TIDAK cukup — gate harus hijau dan harus ada perubahan file, kalau tidak -> bukan COMPLETED.
  */
 export function verdict(opts: {
   agyExitCode: number | null;
   agyOutput: string;
   gate: { ran: boolean; ok: boolean; summary?: string } | null;
   killed: boolean;
+  changed?: boolean;
 }): Verdict {
-  const { agyExitCode, agyOutput, gate, killed } = opts;
+  const { agyExitCode, agyOutput, gate, killed, changed } = opts;
 
   if (isQuotaError(agyOutput) && (agyExitCode ?? 1) !== 0) {
     return { ok: false, status: "FAILED", reason: "kuota model habis (semua model dicoba)" };
@@ -132,6 +170,9 @@ export function verdict(opts: {
   }
   if (!gate.ok) {
     return { ok: false, status: "FAILED", reason: `gate verifikasi MERAH: ${gate.summary || "lihat log"}` };
+  }
+  if (changed === false) {
+    return { ok: false, status: "NO_CHANGES", reason: "tidak ada perubahan file" };
   }
   return { ok: true, status: "COMPLETED", reason: "agy sukses & gate hijau" };
 }

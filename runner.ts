@@ -17,6 +17,7 @@ import {
   parseBacklogMeta,
   resolveBacklogStatus,
   type BacklogItem,
+  hasGitChanges,
 } from "./logic";
 
 const execAsync = promisify(exec);
@@ -269,6 +270,13 @@ async function processLocalTasks() {
 
   db.run(`UPDATE tasks SET status = 'RUNNING', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [task.id]);
 
+  let initialGitStatus = "";
+  try {
+    initialGitStatus = (await execAsync("git status --porcelain", { cwd: targetProject })).stdout.trim();
+  } catch (e: any) {
+    log(`[!] gagal mengambil git status awal: ${e?.message ?? e}`);
+  }
+
   let stdoutData = "";
   let stderrData = "";
   let killed = false;
@@ -333,13 +341,6 @@ async function processLocalTasks() {
     log(`[!] tidak ada gate untuk repo ${basename(targetProject)}`);
   }
 
-  const v = verdict({
-    agyExitCode: quotaExhausted ? 1 : agyExitCode,
-    agyOutput: `${stdoutData}\n${stderrData}`,
-    gate: gateResult ? { ran: true, ok: gateResult.ok, summary: gateResult.summary } : null,
-    killed,
-  });
-
   let gitCommit = "";
   let gitStatus = "";
   try {
@@ -348,6 +349,16 @@ async function processLocalTasks() {
   } catch (e: any) {
     stderrData += `\n[!] git info gagal: ${e?.message ?? e}`;
   }
+
+  const changed = hasGitChanges(initialGitStatus, gitStatus);
+
+  const v = verdict({
+    agyExitCode: quotaExhausted ? 1 : agyExitCode,
+    agyOutput: `${stdoutData}\n${stderrData}`,
+    gate: gateResult ? { ran: true, ok: gateResult.ok, summary: gateResult.summary } : null,
+    killed,
+    changed,
+  });
 
   const outputTail = [
     stdoutData,
@@ -364,7 +375,7 @@ async function processLocalTasks() {
     .slice(-4000);
 
   await finish(task, {
-    status: v.ok ? "COMPLETED" : "FAILED",
+    status: v.status,
     exitCode: killed ? 124 : agyExitCode ?? 1,
     outputTail,
     error: v.ok ? "" : v.reason,

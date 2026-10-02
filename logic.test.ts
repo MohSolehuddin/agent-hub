@@ -11,6 +11,8 @@ import {
   parseMetaContent,
   resolveBacklogStatus,
   parseBacklogMeta,
+  hasGitChanges,
+  isNoiseGitLine,
 } from "./logic";
 
 const io = (files: string[], json?: Record<string, any>) => ({
@@ -110,6 +112,111 @@ describe("verdict — exit 0 saja TIDAK cukup", () => {
   test("agy gagal -> FAILED", () => {
     const v = verdict({ agyExitCode: 2, agyOutput: "boom", gate: null, killed: false });
     expect(v.status).toBe("FAILED");
+  });
+
+  // (a) exit 0 + ada perubahan + gate ok -> COMPLETED
+  test("(a) exit 0 + ada perubahan + gate ok -> COMPLETED", () => {
+    const v = verdict({
+      agyExitCode: 0,
+      agyOutput: "done",
+      gate: { ran: true, ok: true },
+      killed: false,
+      changed: true,
+    });
+    expect(v.ok).toBe(true);
+    expect(v.status).toBe("COMPLETED");
+    expect(v.reason).toBe("agy sukses & gate hijau");
+  });
+
+  // (b) exit 0 + TIDAK ada perubahan -> bukan COMPLETED (NO_CHANGES)
+  test("(b) exit 0 + TIDAK ada perubahan -> bukan COMPLETED (NO_CHANGES)", () => {
+    const v = verdict({
+      agyExitCode: 0,
+      agyOutput: "done",
+      gate: { ran: true, ok: true },
+      killed: false,
+      changed: false,
+    });
+    expect(v.ok).toBe(false);
+    expect(v.status).toBe("NO_CHANGES");
+    expect(v.reason).toContain("tidak ada perubahan file");
+  });
+
+  // (c) gate merah -> FAILED
+  test("(c) gate merah -> FAILED (bahkan jika ada perubahan)", () => {
+    const v = verdict({
+      agyExitCode: 0,
+      agyOutput: "done",
+      gate: { ran: true, ok: false, summary: "GATE GAGAL: test error" },
+      killed: false,
+      changed: true,
+    });
+    expect(v.ok).toBe(false);
+    expect(v.status).toBe("FAILED");
+    expect(v.reason).toContain("gate verifikasi MERAH");
+  });
+
+  test("(c) gate merah -> FAILED (jika tidak ada perubahan)", () => {
+    const v = verdict({
+      agyExitCode: 0,
+      agyOutput: "done",
+      gate: { ran: true, ok: false, summary: "GATE GAGAL: syntax error" },
+      killed: false,
+      changed: false,
+    });
+    expect(v.ok).toBe(false);
+    expect(v.status).toBe("FAILED");
+    expect(v.reason).toContain("gate verifikasi MERAH");
+  });
+});
+
+describe("deteksi perubahan git & filter noise", () => {
+  test("isNoiseGitLine mendeteksi .agent-hub.json, logs/, node_modules/", () => {
+    expect(isNoiseGitLine("?? .agent-hub.json")).toBe(true);
+    expect(isNoiseGitLine(" M .agent-hub.json")).toBe(true);
+    expect(isNoiseGitLine("?? logs/task-123.log")).toBe(true);
+    expect(isNoiseGitLine("?? logs/service.log")).toBe(true);
+    expect(isNoiseGitLine("?? node_modules/pkg/index.js")).toBe(true);
+    expect(isNoiseGitLine(" M node_modules/pkg/package.json")).toBe(true);
+    expect(isNoiseGitLine('?? "logs/quoted.log"')).toBe(true);
+    expect(isNoiseGitLine("?? sub/logs/debug.log")).toBe(true);
+
+    // Bukan noise
+    expect(isNoiseGitLine("?? src/index.ts")).toBe(false);
+    expect(isNoiseGitLine(" M logic.ts")).toBe(false);
+    expect(isNoiseGitLine("A  README.md")).toBe(false);
+    expect(isNoiseGitLine(" D old.go")).toBe(false);
+  });
+
+  test("hasGitChanges: sama persis -> false (tidak ada perubahan)", () => {
+    expect(hasGitChanges("", "")).toBe(false);
+    expect(hasGitChanges(" M file.txt", " M file.txt")).toBe(false);
+  });
+
+  test("hasGitChanges: mengabaikan file noise", () => {
+    expect(hasGitChanges("", "?? logs/task-bac.log")).toBe(false);
+    expect(hasGitChanges("", "?? .agent-hub.json\n?? logs/task-1.log")).toBe(false);
+    expect(hasGitChanges("", "?? node_modules/foo/bar.js")).toBe(false);
+  });
+
+  test("hasGitChanges: mengabaikan untracked yang sudah ada sebelum run", () => {
+    const before = "?? pre-existing.txt\n?? another.txt";
+    const after = "?? pre-existing.txt\n?? another.txt\n?? logs/task-1.log";
+    expect(hasGitChanges(before, after)).toBe(false);
+  });
+
+  test("hasGitChanges: mendeteksi perubahan file nyata", () => {
+    const before = "?? pre-existing.txt";
+    const after = "?? pre-existing.txt\n M src/logic.ts";
+    expect(hasGitChanges(before, after)).toBe(true);
+  });
+
+  test("hasGitChanges: mendeteksi penambahan file baru", () => {
+    expect(hasGitChanges("", "?? src/new-feature.ts")).toBe(true);
+  });
+
+  test("hasGitChanges: mendeteksi penghapusan file", () => {
+    expect(hasGitChanges("?? temp.txt", "")).toBe(true);
   });
 });
 
