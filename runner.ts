@@ -20,6 +20,7 @@ import {
   hasGitChanges,
   resolveLogDir,
   resolveDashboardPath,
+  extractBacklogRef,
 } from "./logic";
 
 const execAsync = promisify(exec);
@@ -91,10 +92,11 @@ async function fetchTasksFromServer() {
 
       const t = data.task;
       const project = t.project_path || DEFAULT_WORKSPACE;
+      const serverTaskRef = extractBacklogRef(t.prompt) ?? t.server_task_ref ?? t.task_id ?? null;
       db.run(
         `INSERT INTO tasks (task_prompt, target_project, server_task_id, server_task_ref, timeout_minutes, status)
          VALUES (?, ?, ?, ?, ?, 'PENDING')`,
-        [t.prompt, project, t.task_id ?? null, t.task_id ?? null, Number(t.timeout_minutes) || DEFAULT_TIMEOUT_MIN],
+        [t.prompt, project, t.task_id ?? null, serverTaskRef, Number(t.timeout_minutes) || DEFAULT_TIMEOUT_MIN],
       );
       log(`[⬇️] Tugas ${t.task_id} diklaim dari server (repo: ${project})`);
       return;

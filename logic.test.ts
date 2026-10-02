@@ -19,6 +19,7 @@ import {
   getStatusBadgeClass,
   getStatusLabel,
   getStatusDescription,
+  extractBacklogRef,
 } from "./logic";
 
 const io = (files: string[], json?: Record<string, any>) => ({
@@ -396,5 +397,49 @@ describe("format status dashboard", () => {
     expect(getStatusDescription("COMPLETED")).toBe("");
   });
 });
+
+describe("extractBacklogRef", () => {
+  test("(a) prompt memuat baris 'REF: PT-49' -> 'PT-49'", () => {
+    expect(extractBacklogRef("REF: PT-49")).toBe("PT-49");
+    expect(extractBacklogRef("REF: PT-49\nTolong perbaiki bug ini")).toBe("PT-49");
+  });
+
+  test("(b) 'ref: aw-31' -> 'AW-31' (case-insensitive)", () => {
+    expect(extractBacklogRef("ref: aw-31")).toBe("AW-31");
+    expect(extractBacklogRef("Ref: Aw-31")).toBe("AW-31");
+    expect(extractBacklogRef("REF: aw_31.v2")).toBe("AW_31.V2");
+  });
+
+  test("(c) prompt tanpa REF -> null", () => {
+    expect(extractBacklogRef("Tolong jalankan migrasi database")).toBeNull();
+    expect(extractBacklogRef("PREFIX_REF: PT-49")).toBeNull();
+    expect(extractBacklogRef("REF: ")).toBeNull();
+  });
+
+  test("(d) prompt multi-baris dengan REF di tengah -> tetap terdeteksi", () => {
+    const prompt = `ATURAN OPERASIONAL CLI:
+- Kerjakan di foreground
+
+REF: PT-49
+
+--- TUGAS ---
+Perbaiki issue pada dashboard.`;
+    expect(extractBacklogRef(prompt)).toBe("PT-49");
+
+    const promptLower = `Header line 1
+Header line 2
+  ref: aw-31  
+Detail tugas di bawah.`;
+    expect(extractBacklogRef(promptLower)).toBe("AW-31");
+  });
+
+  test("(e) prompt kosong -> null", () => {
+    expect(extractBacklogRef("")).toBeNull();
+    expect(extractBacklogRef("   \n\t  ")).toBeNull();
+    expect(extractBacklogRef(null as any)).toBeNull();
+    expect(extractBacklogRef(undefined as any)).toBeNull();
+  });
+});
+
 
 

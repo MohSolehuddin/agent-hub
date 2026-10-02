@@ -232,6 +232,16 @@ export function parseMetaContent(content: string): Record<string, string> {
   return result;
 }
 
+/**
+ * Ekstrak REF backlog dari isi prompt (mis. "REF: PT-49" -> "PT-49").
+ * Mengembalikan ID dalam HURUF BESAR, atau null bila tidak ditemukan / prompt kosong.
+ */
+export function extractBacklogRef(prompt: string): string | null {
+  if (!prompt || typeof prompt !== "string") return null;
+  const match = prompt.match(/^\s*REF:\s*([A-Za-z0-9._-]+)\s*$/im);
+  return match ? match[1].toUpperCase() : null;
+}
+
 export type BacklogItem = {
   id: string;
   project_dir: string;
