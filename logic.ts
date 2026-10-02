@@ -1,3 +1,5 @@
+import { join } from "path";
+
 /**
  * logic.ts — logika MURNI agent-hub (tanpa I/O), supaya bisa diuji dengan `bun test`.
  * Semua keputusan penting ada di sini: rotasi model, deteksi kuota, deteksi gate repo,
@@ -274,5 +276,33 @@ export function parseBacklogMeta(id: string, content: string, status: string): B
     verify: meta.VERIFY || meta.verify || "",
     timeout: meta.TIMEOUT || meta.timeout || "",
   };
+}
+
+/**
+ * Resolusi path database SQLite lokal.
+ * Default relatif ke cwd ("agent_tasks.sqlite") agar setiap lane yang berjalan di direktori berbeda
+ * memiliki antrean lokal sendiri, dan bisa di-override via env DB_PATH.
+ */
+export function resolveDbPath(envPath?: string): string {
+  return envPath && envPath.trim() ? envPath.trim() : "agent_tasks.sqlite";
+}
+
+/**
+ * Resolusi direktori log.
+ * Default ke <cwd>/logs, tetapi bisa di-override via env LOG_DIR.
+ */
+export function resolveLogDir(envLogDir?: string, cwd: string = process.cwd()): string {
+  if (envLogDir && envLogDir.trim()) {
+    return envLogDir.trim();
+  }
+  return join(cwd, "logs");
+}
+
+/**
+ * Resolusi path file dashboard (public/index.html) relatif terhadap lokasi file module (baseDir),
+ * bukan dari process cwd.
+ */
+export function resolveDashboardPath(baseDir: string): string {
+  return join(baseDir, "public", "index.html");
 }
 

@@ -13,6 +13,9 @@ import {
   parseBacklogMeta,
   hasGitChanges,
   isNoiseGitLine,
+  resolveDbPath,
+  resolveLogDir,
+  resolveDashboardPath,
 } from "./logic";
 
 const io = (files: string[], json?: Record<string, any>) => ({
@@ -338,6 +341,32 @@ EXTRA="nested 'quote' test"
     expect(item.commit).toBe("feat: awesome feature");
     expect(item.status).toBe("PENDING");
     expect(item.model).toBe("gemini-3.7-flash-medium");
+  });
+});
+
+describe("resolusi path lingkungan & multi-lane", () => {
+  test("resolveDbPath default relatif ke cwd (agent_tasks.sqlite)", () => {
+    expect(resolveDbPath()).toBe("agent_tasks.sqlite");
+    expect(resolveDbPath("")).toBe("agent_tasks.sqlite");
+    expect(resolveDbPath("   ")).toBe("agent_tasks.sqlite");
+  });
+
+  test("resolveDbPath menerima override env DB_PATH", () => {
+    expect(resolveDbPath("/custom/path/agent.sqlite")).toBe("/custom/path/agent.sqlite");
+    expect(resolveDbPath("custom.sqlite")).toBe("custom.sqlite");
+  });
+
+  test("resolveLogDir default ke <cwd>/logs", () => {
+    expect(resolveLogDir(undefined, "/lane2/dir")).toBe("/lane2/dir/logs");
+    expect(resolveLogDir("", "/lane2/dir")).toBe("/lane2/dir/logs");
+  });
+
+  test("resolveLogDir menerima override env LOG_DIR", () => {
+    expect(resolveLogDir("/var/log/agent-hub", "/lane2/dir")).toBe("/var/log/agent-hub");
+  });
+
+  test("resolveDashboardPath selalu merujuk ke public/index.html di folder module", () => {
+    expect(resolveDashboardPath("/opt/agent-hub")).toBe("/opt/agent-hub/public/index.html");
   });
 });
 

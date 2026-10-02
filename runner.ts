@@ -18,6 +18,8 @@ import {
   resolveBacklogStatus,
   type BacklogItem,
   hasGitChanges,
+  resolveLogDir,
+  resolveDashboardPath,
 } from "./logic";
 
 const execAsync = promisify(exec);
@@ -35,7 +37,8 @@ const DEFAULT_WORKSPACE =
   process.env.DEFAULT_WORKSPACE || join(process.env.HOME || "/home/msytc", "project/have-fun/personal-tools");
 const BACKLOG_DIR = process.env.BACKLOG_DIR || "/home/msytc/hermes-work/review-loop/tasks";
 const POLL_MS = Number(process.env.POLL_MS || 10000);
-const LOG_DIR = join(process.cwd(), "logs");
+const LOG_DIR = resolveLogDir(process.env.LOG_DIR, process.cwd());
+const DASHBOARD_HTML_PATH = resolveDashboardPath(import.meta.dir);
 
 // Preamble WAJIB untuk setiap tugas yang dikirim ke agy.
 // Tanpa ini, agy bisa melempar verifikasi ke background task lalu idle -> keluar 0
@@ -458,7 +461,7 @@ new Elysia()
   .get("/api/local-tasks", () => db.query(`SELECT * FROM tasks ORDER BY id DESC LIMIT 100`).all())
   .get("/api/backlog", () => getBacklogTasks())
   .get("/api/health", () => ({ ok: true, agent: AGENT_NAME, models: MODELS, running: isRunning }))
-  .get("/", () => Bun.file("public/index.html"))
+  .get("/", () => Bun.file(DASHBOARD_HTML_PATH))
   .listen(Number(process.env.PORT || 4000));
 
 log(`🚀 [Agent Hub] aktif — dashboard: http://localhost:${process.env.PORT || 4000}`);

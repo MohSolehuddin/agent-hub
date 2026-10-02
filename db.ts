@@ -1,7 +1,11 @@
 import { Database } from "bun:sqlite";
+import { resolveDbPath } from "./logic";
 
-// Membuka/membuat database lokal agent-hub
-export const db = new Database("agent_tasks.sqlite", { create: true });
+// Membuka/membuat database lokal agent-hub.
+// TETAP relatif ke cwd secara default ("agent_tasks.sqlite") agar setiap lane yang
+// dijalankan dari direktori terpisah memiliki antrean lokal sendiri.
+// Mendukung override path via env DB_PATH bila diset.
+export const db = new Database(resolveDbPath(process.env.DB_PATH), { create: true });
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS tasks (
