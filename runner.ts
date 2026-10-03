@@ -22,6 +22,7 @@ import {
   resolveDashboardPath,
   extractBacklogRef,
   collectDocsSections,
+  withDocPreamble,
 } from "./logic";
 
 const execAsync = promisify(exec);
@@ -41,18 +42,6 @@ const BACKLOG_DIR = process.env.BACKLOG_DIR || "/home/msytc/hermes-work/review-l
 const POLL_MS = Number(process.env.POLL_MS || 10000);
 const LOG_DIR = resolveLogDir(process.env.LOG_DIR, process.cwd());
 const DASHBOARD_HTML_PATH = resolveDashboardPath(import.meta.dir);
-
-// Preamble WAJIB untuk setiap tugas yang dikirim ke agy.
-// Tanpa ini, agy bisa melempar verifikasi ke background task lalu idle -> keluar 0
-// tanpa mengubah file apa pun, dan gate (yang tidak melihat perubahan) tetap hijau.
-const PREAMBLE = `ATURAN OPERASIONAL CLI (WAJIB, jangan dilanggar):
-- Jalankan SEMUA perintah shell (build/test/verifikasi) di FOREGROUND (blocking). JANGAN memakai background task, task async, atau tanda "&".
-- Jangan menunggu apa pun setelah menjawab; selesaikan satu turn sampai tuntas.
-- Jangan push ke remote. Jangan menghapus data/database. Jangan menyentuh file di luar lingkup tugas.
-- Bahasa laporan akhir: singkat, Indonesia.
-
---- TUGAS ---
-`;
 
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 
@@ -350,7 +339,7 @@ async function processLocalTasks() {
 
     const args = [
       "-p",
-      PREAMBLE + task.task_prompt,
+      withDocPreamble(task.task_prompt),
       "--dangerously-skip-permissions",
       "--add-dir",
       targetProject,

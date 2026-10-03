@@ -48,6 +48,22 @@ export const DOCS_SECTIONS_CONFIG: Array<{ section: string; filename: string }> 
   { section: "log", filename: "LOG.md" },
 ];
 
+export const DOC_DRIVEN_PREAMBLE = `ATURAN OPERASIONAL CLI & DOC-DRIVEN DEVELOPMENT (WAJIB, jangan dilanggar):
+- WAJIB baca folder docs/ repo (TECH_STACK.md, CODE_CONTRACT.md, RUNBOOK.md) SEBELUM menulis kode.
+- Jika menambah/mengubah fungsi, endpoint, atau cara setup: WAJIB perbarui CODE_CONTRACT.md / RUNBOOK.md di repo.
+- JANGAN memakai fungsi/library di luar yang tercatat di dokumentasi.
+- Jalankan SEMUA perintah shell (build/test/verifikasi) di FOREGROUND (blocking). JANGAN memakai background task, task async, atau tanda "&".
+- Jangan menunggu apa pun setelah menjawab; selesaikan satu turn sampai tuntas.
+- Jangan push ke remote. Jangan menghapus data/database. Jangan menyentuh file di luar lingkup tugas.
+- Bahasa laporan akhir: singkat, Indonesia.`;
+
+/**
+ * Bungkus prompt tugas dengan preamble Doc-Driven Development dan aturan operasional CLI.
+ */
+export function withDocPreamble(prompt: string): string {
+  return DOC_DRIVEN_PREAMBLE + "\n\n--- TUGAS ---\n" + prompt;
+}
+
 /**
  * Kumpulkan section dokumentasi dari folder docs/ sebuah repository.
  * Memetakan:

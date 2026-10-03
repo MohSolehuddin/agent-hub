@@ -22,6 +22,8 @@ import {
   extractBacklogRef,
   collectDocsSections,
   type DocSection,
+  DOC_DRIVEN_PREAMBLE,
+  withDocPreamble,
 } from "./logic";
 
 const io = (files: string[], json?: Record<string, any>) => ({
@@ -546,6 +548,39 @@ describe("collectDocsSections", () => {
     ]);
   });
 });
+
+describe("withDocPreamble & DOC_DRIVEN_PREAMBLE", () => {
+  test("skenario 1: membungkus prompt sederhana dengan preamble dan header tugas", () => {
+    const prompt = "Perbaiki error di modul login";
+    const result = withDocPreamble(prompt);
+    expect(result).toBe(`${DOC_DRIVEN_PREAMBLE}\n\n--- TUGAS ---\n${prompt}`);
+    expect(result.startsWith(DOC_DRIVEN_PREAMBLE)).toBe(true);
+    expect(result.endsWith(prompt)).toBe(true);
+  });
+
+  test("skenario 2: membungkus prompt kompleks multi-baris dan mempertahankan isi prompt", () => {
+    const complexPrompt = `REF: PT-100\n\nBuat unit test baru untuk fungsi withDocPreamble.\nPastikan coverage 100%.`;
+    const result = withDocPreamble(complexPrompt);
+    expect(result).toBe(`${DOC_DRIVEN_PREAMBLE}\n\n--- TUGAS ---\n${complexPrompt}`);
+    expect(result).toContain("\n\n--- TUGAS ---\nREF: PT-100");
+  });
+
+  test("skenario 3: menangani prompt string kosong", () => {
+    const result = withDocPreamble("");
+    expect(result).toBe(`${DOC_DRIVEN_PREAMBLE}\n\n--- TUGAS ---\n`);
+  });
+
+  test("skenario 4: DOC_DRIVEN_PREAMBLE memuat aturan wajib Doc-Driven Dev & operasional CLI", () => {
+    expect(DOC_DRIVEN_PREAMBLE).toContain("docs/");
+    expect(DOC_DRIVEN_PREAMBLE).toContain("TECH_STACK.md");
+    expect(DOC_DRIVEN_PREAMBLE).toContain("CODE_CONTRACT.md");
+    expect(DOC_DRIVEN_PREAMBLE).toContain("RUNBOOK.md");
+    expect(DOC_DRIVEN_PREAMBLE).toContain("FOREGROUND");
+    expect(DOC_DRIVEN_PREAMBLE).toContain("push");
+    expect(DOC_DRIVEN_PREAMBLE).toContain("Indonesia");
+  });
+});
+
 
 
 
