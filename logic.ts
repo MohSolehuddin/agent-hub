@@ -30,7 +30,140 @@ const BUILTIN_GATES: Record<string, string[]> = {
 export type RepoFs = {
   exists: (p: string) => boolean;
   readJson?: (p: string) => any;
+  readText?: (p: string) => string;
+  readFile?: (p: string) => string;
+  readdir?: (p: string) => string[];
+  listDir?: (p: string) => string[];
 };
+
+export type DocSection = {
+  section: string;
+  content: string;
+};
+
+export const DOCS_SECTIONS_CONFIG: Array<{ section: string; filename: string }> = [
+  { section: "tech_stack", filename: "TECH_STACK.md" },
+  { section: "code_contract", filename: "CODE_CONTRACT.md" },
+  { section: "runbook", filename: "RUNBOOK.md" },
+  { section: "log", filename: "LOG.md" },
+];
+
+/**
+ * Kumpulkan section dokumentasi dari folder docs/ sebuah repository.
+ * Memetakan:
+ * - docs/TECH_STACK.md -> "tech_stack"
+ * - docs/CODE_CONTRACT.md -> "code_contract"
+ * - docs/RUNBOOK.md -> "runbook"
+ * - docs/LOG.md -> "log"
+ * Cocokkan nama file secara case-insensitive dan hanya kembalikan file yang ada.
+ */
+export function collectDocsSections(dir: string, fs: RepoFs): DocSection[] {
+  const sections: DocSection[] = [];
+  const normalizedDir = dir.replace(/\/+$/, "");
+
+  const readFn = (p: string): string | null => {
+    if (fs.readText) {
+      try {
+        return fs.readText(p);
+      } catch {
+        return null;
+      }
+    }
+    if (fs.readFile) {
+      try {
+        return fs.readFile(p);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  };
+
+  const listFn = (p: string): string[] | null => {
+    if (fs.readdir) {
+      try {
+        return fs.readdir(p);
+      } catch {
+        return null;
+      }
+    }
+    if (fs.listDir) {
+      try {
+        return fs.listDir(p);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  };
+
+  // Cari folder docs (case-insensitive)
+  let docsFolderName: string | null = null;
+  const rootEntries = listFn(normalizedDir);
+  if (rootEntries) {
+    const found = rootEntries.find((e) => e.toLowerCase() === "docs");
+    if (found) docsFolderName = found;
+  }
+
+  if (!docsFolderName) {
+    if (fs.exists(`${normalizedDir}/docs`)) {
+      docsFolderName = "docs";
+    } else if (fs.exists(`${normalizedDir}/DOCS`)) {
+      docsFolderName = "DOCS";
+    } else if (fs.exists(`${normalizedDir}/Docs`)) {
+      docsFolderName = "Docs";
+    }
+  }
+
+  if (docsFolderName) {
+    const docsPath = `${normalizedDir}/${docsFolderName}`;
+    const docEntries = listFn(docsPath);
+
+    if (docEntries) {
+      for (const target of DOCS_SECTIONS_CONFIG) {
+        const matched = docEntries.find((f) => f.toLowerCase() === target.filename.toLowerCase());
+        if (matched) {
+          const filePath = `${docsPath}/${matched}`;
+          const content = readFn(filePath);
+          if (content !== null && content !== undefined) {
+            sections.push({ section: target.section, content });
+          }
+        }
+      }
+      return sections;
+    }
+  }
+
+  // Fallback jika readdir/listDir tidak tersedia: cek exists untuk beberapa variasi nama umum
+  const docsFolderCandidates = docsFolderName ? [docsFolderName] : ["docs", "DOCS", "Docs"];
+  for (const target of DOCS_SECTIONS_CONFIG) {
+    let found = false;
+    for (const df of docsFolderCandidates) {
+      if (found) break;
+      const baseName = target.filename;
+      const nameVariations = [
+        baseName,
+        baseName.toLowerCase(),
+        baseName.toUpperCase(),
+        baseName.charAt(0).toUpperCase() + baseName.slice(1).toLowerCase(),
+      ];
+      const uniqueNames = Array.from(new Set(nameVariations));
+      for (const fn of uniqueNames) {
+        const fullPath = `${normalizedDir}/${df}/${fn}`;
+        if (fs.exists(fullPath)) {
+          const content = readFn(fullPath);
+          if (content !== null && content !== undefined) {
+            sections.push({ section: target.section, content });
+            found = true;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  return sections;
+}
 
 /**
  * Tentukan gate verifikasi untuk sebuah repo.

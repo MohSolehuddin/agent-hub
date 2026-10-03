@@ -20,6 +20,8 @@ import {
   getStatusLabel,
   getStatusDescription,
   extractBacklogRef,
+  collectDocsSections,
+  type DocSection,
 } from "./logic";
 
 const io = (files: string[], json?: Record<string, any>) => ({
@@ -440,6 +442,111 @@ Detail tugas di bawah.`;
     expect(extractBacklogRef(undefined as any)).toBeNull();
   });
 });
+
+describe("collectDocsSections", () => {
+  const createMockFs = (files: Record<string, string>) => ({
+    exists: (p: string) => p in files,
+    readText: (p: string) => {
+      if (p in files) return files[p];
+      throw new Error(`File not found: ${p}`);
+    },
+    readdir: (p: string) => {
+      const normalized = p.replace(/\/+$/, "");
+      const matched = new Set<string>();
+      for (const f of Object.keys(files)) {
+        if (f.startsWith(normalized + "/")) {
+          const rest = f.slice(normalized.length + 1);
+          const segment = rest.split("/")[0];
+          if (segment) matched.add(segment);
+        }
+      }
+      return Array.from(matched);
+    },
+  });
+
+  test("skenario 1: semua 4 file docs ada -> mengembalikan 4 section lengkap", () => {
+    const fs = createMockFs({
+      "/repo/my-app/docs/TECH_STACK.md": "# Tech Stack\nBun, TypeScript, Elysia",
+      "/repo/my-app/docs/CODE_CONTRACT.md": "# Code Contract\nNo mutation",
+      "/repo/my-app/docs/RUNBOOK.md": "# Runbook\nbun run dev",
+      "/repo/my-app/docs/LOG.md": "# Log\n- 2026-10-04: Initial setup",
+    });
+
+    const res = collectDocsSections("/repo/my-app", fs);
+    expect(res).toHaveLength(4);
+    expect(res).toEqual([
+      { section: "tech_stack", content: "# Tech Stack\nBun, TypeScript, Elysia" },
+      { section: "code_contract", content: "# Code Contract\nNo mutation" },
+      { section: "runbook", content: "# Runbook\nbun run dev" },
+      { section: "log", content: "# Log\n- 2026-10-04: Initial setup" },
+    ]);
+  });
+
+  test("skenario 2: hanya sebagian file yang ada -> mengabaikan file yang tidak ada", () => {
+    const fs = createMockFs({
+      "/repo/partial/docs/TECH_STACK.md": "# Tech Stack\nGo, SQLite",
+      "/repo/partial/docs/LOG.md": "# Log\nChangelog here",
+    });
+
+    const res = collectDocsSections("/repo/partial", fs);
+    expect(res).toHaveLength(2);
+    expect(res).toEqual([
+      { section: "tech_stack", content: "# Tech Stack\nGo, SQLite" },
+      { section: "log", content: "# Log\nChangelog here" },
+    ]);
+  });
+
+  test("skenario 3: nama file case-insensitive (mis. tech_stack.md, CODE_CONTRACT.MD, Runbook.md, log.md)", () => {
+    const fs = createMockFs({
+      "/repo/mixed-case/docs/tech_stack.md": "tech stack lowercase",
+      "/repo/mixed-case/docs/CODE_CONTRACT.MD": "contract uppercase ext",
+      "/repo/mixed-case/docs/RunBook.md": "runbook mixed case",
+      "/repo/mixed-case/docs/log.MD": "log content",
+      "/repo/mixed-case/docs/README.md": "should be ignored",
+    });
+
+    const res = collectDocsSections("/repo/mixed-case", fs);
+    expect(res).toHaveLength(4);
+    expect(res).toEqual([
+      { section: "tech_stack", content: "tech stack lowercase" },
+      { section: "code_contract", content: "contract uppercase ext" },
+      { section: "runbook", content: "runbook mixed case" },
+      { section: "log", content: "log content" },
+    ]);
+  });
+
+  test("skenario 4: folder docs kosong atau tidak memiliki 4 file yang dicari -> mengembalikan array kosong", () => {
+    const fsEmpty = createMockFs({
+      "/repo/empty/docs/README.md": "# Overview only",
+      "/repo/empty/docs/ARCHITECTURE.md": "# Architecture",
+    });
+    expect(collectDocsSections("/repo/empty", fsEmpty)).toEqual([]);
+
+    const fsNoDocs = createMockFs({
+      "/repo/no-docs/src/index.ts": "console.log('hi')",
+    });
+    expect(collectDocsSections("/repo/no-docs", fsNoDocs)).toEqual([]);
+  });
+
+  test("skenario 5: fallback in-memory fs tanpa readdir (hanya exists dan readText)", () => {
+    const files: Record<string, string> = {
+      "/repo/simple/docs/tech_stack.md": "tech stack simple",
+      "/repo/simple/docs/RUNBOOK.md": "runbook simple",
+    };
+    const simpleFs = {
+      exists: (p: string) => p in files,
+      readText: (p: string) => files[p],
+    };
+
+    const res = collectDocsSections("/repo/simple", simpleFs);
+    expect(res).toHaveLength(2);
+    expect(res).toEqual([
+      { section: "tech_stack", content: "tech stack simple" },
+      { section: "runbook", content: "runbook simple" },
+    ]);
+  });
+});
+
 
 
 

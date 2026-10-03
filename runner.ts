@@ -21,6 +21,7 @@ import {
   resolveLogDir,
   resolveDashboardPath,
   extractBacklogRef,
+  collectDocsSections,
 } from "./logic";
 
 const execAsync = promisify(exec);
@@ -245,6 +246,54 @@ async function finish(
   }
 }
 
+async function syncProjectDocs(projectPath: string, commitSha?: string) {
+  try {
+    const realFs = {
+      exists: (p: string) => fs.existsSync(p),
+      readText: (p: string) => fs.readFileSync(p, "utf8"),
+      readdir: (p: string) => fs.readdirSync(p),
+    };
+
+    const files = collectDocsSections(projectPath, realFs);
+    if (files.length === 0) {
+      log(`[ℹ️] docs sync: tidak ada file docs di ${basename(projectPath)}`);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+    const body: Record<string, any> = {
+      project: basename(projectPath),
+      files,
+    };
+    if (commitSha) {
+      body.commit_sha = commitSha;
+    }
+
+    try {
+      const res = await fetch(`${SERVER_URL}/api/project-docs/sync`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        log(`[!] docs sync gagal: HTTP ${res.status} ${res.statusText}`);
+      } else {
+        log(`[📄] docs sync sukses (${files.length} sections) untuk ${basename(projectPath)}`);
+      }
+    } catch (fetchErr: any) {
+      clearTimeout(timeoutId);
+      log(`[!] docs sync error: ${fetchErr?.message ?? fetchErr}`);
+    }
+  } catch (err: any) {
+    log(`[!] docs sync error: ${err?.message ?? err}`);
+  }
+}
+
 async function processLocalTasks() {
   if (isRunning) return;
 
@@ -389,6 +438,10 @@ async function processLocalTasks() {
     project: targetProject,
     gitCommit,
   });
+
+  if (v.status === "COMPLETED") {
+    await syncProjectDocs(targetProject, gitCommit || undefined);
+  }
 
   isRunning = false;
 }
