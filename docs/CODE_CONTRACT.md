@@ -69,8 +69,32 @@ type BacklogItem = {
 };
 ```
 
+#### `DocSection`
+```ts
+type DocSection = {
+  section: string;
+  content: string;
+};
+```
+
+#### `LogEntryFields`
+```ts
+type LogEntryFields = {
+  timestamp?: string | Date;
+  taskRef?: string;
+  verdict?: string;
+  commit7?: string;
+  commit?: string;
+  numFiles?: number | string;
+  nFiles?: number | string;
+  filesCount?: number | string;
+};
+```
+
 ### Konstanta
 - `CLAIM_RETRY_DELAYS`: `number[]` = `[1000, 2000, 4000]` (jeda waktu retry klaim HTTP).
+- `DOCS_SECTIONS_CONFIG`: `Array<{ section: string; filename: string }>` = Pemetaan section dokumentasi ke nama file target (`tech_stack` -> `TECH_STACK.md`, `code_contract` -> `CODE_CONTRACT.md`, `runbook` -> `RUNBOOK.md`, `log` -> `LOG.md`).
+- `DOC_DRIVEN_PREAMBLE`: `string` = Teks panduan operasional CLI dan instruksi Doc-Driven Development yang diinjeksi ke prompt tugas sebelum dijalankan oleh agy.
 
 ### Fungsi-Fungsi
 
@@ -176,6 +200,30 @@ type BacklogItem = {
 - **Nilai Balik**: `string` — Deskripsi penjelasan status.
 - **Efek Samping**: Murni.
 
+#### `withDocPreamble(prompt: string): string`
+- **Parameter**: `prompt` (`string`): Teks prompt tugas asli.
+- **Nilai Balik**: `string` — Prompt yang telah dibungkus dengan `DOC_DRIVEN_PREAMBLE` di bagian atas (`${DOC_DRIVEN_PREAMBLE}\n\n--- TUGAS ---\n${prompt}`).
+- **Efek Samping**: Murni.
+
+#### `collectDocsSections(dir: string, fs: RepoFs): DocSection[]`
+- **Parameter**:
+  - `dir` (`string`): Path direktori repositori target.
+  - `fs` (`RepoFs`): Abstraksi I/O sistem berkas (`exists`, `readText`/`readFile`, `readdir`/`listDir`).
+- **Nilai Balik**: `DocSection[]` — Daftar berkas dokumentasi yang berhasil ditemukan dan dibaca dari folder `docs/` (case-insensitive: `TECH_STACK.md`, `CODE_CONTRACT.md`, `RUNBOOK.md`, `LOG.md`).
+- **Efek Samping**: Tidak melakukan I/O langsung. Kesalahan baca ditangani secara aman dengan fallback.
+
+#### `buildLogEntry(fields: LogEntryFields): string`
+- **Parameter**: `fields` (`LogEntryFields`): Objek field entri log (`timestamp`, `taskRef`, `verdict`, `commit7`/`commit`, `numFiles`/`nFiles`/`filesCount`).
+- **Nilai Balik**: `string` — Satu baris entri markdown log dengan format: `- <ISO timestamp> | <taskRef> | <verdict> | <commit7> | <n files>`.
+- **Efek Samping**: Murni.
+
+#### `appendLogEntry(existing: string, entry: string): string`
+- **Parameter**:
+  - `existing` (`string`): Isi markdown log yang sudah ada.
+  - `entry` (`string`): Satu baris entri markdown baru.
+- **Nilai Balik**: `string` — Menggabungkan entri baru di akhir dokumen secara append-only, memastikan pemisah baris (`\n`) tetap rapi.
+- **Efek Samping**: Murni.
+
 ---
 
 ## 3. Modul Runner & Service (`runner.ts`)
@@ -214,9 +262,13 @@ type BacklogItem = {
   2. Memperbarui status, log tail, dan model pada tabel SQLite lokal.
   3. Mengirim payload status callback ke `${SERVER_URL}/api/agent-dispatcher/callback`.
 
+#### `syncProjectDocs(projectPath: string, commitSha?: string): Promise<void>`
+- **Peran**: Mengumpulkan dokumen dari folder `docs/` di `projectPath` via `collectDocsSections` dan mengirimkannya melalui HTTP POST ke `${SERVER_URL}/api/project-docs/sync` dengan payload `{ project, files, commit_sha }` (timeout 10 detik via `AbortController`).
+- **Efek Samping / Error Handling**: Non-fatal. Menulis log `[📄]` jika sukses atau `[!]` jika gagal/error; kegagalan tidak membatalkan alur eksekusi tugas.
+
 #### `processLocalTasks(): Promise<void>`
-- **Peran**: Loop utama pemrosesan antrean lokal. Mengambil satu tugas `PENDING` tertua, menandai `RUNNING`, mengeksekusi `agy` dengan failover model rotasi, menjalankan gate verifikasi jika exit code 0, memeriksa perubahan git, menghitung `verdict()`, lalu memanggil `finish()`.
-- **Efek Samping**: Modifikasi database lokal, eksekusi proses eksternal, mutasi filesystem target.
+- **Peran**: Loop utama pemrosesan antrean lokal. Mengambil satu tugas `PENDING` tertua, menandai `RUNNING`, membungkus prompt dengan `withDocPreamble()`, mengeksekusi `agy` dengan failover model rotasi, menjalankan gate verifikasi jika exit code 0, memeriksa perubahan git, menghitung `verdict()`, lalu memanggil `finish()`. Jika status akhir `COMPLETED`, worker otomatis memperbarui `docs/LOG.md` (via `buildLogEntry` & `appendLogEntry`) dan memanggil `syncProjectDocs()`.
+- **Efek Samping**: Modifikasi database lokal, eksekusi proses eksternal, mutasi filesystem target (termasuk penulisan `docs/LOG.md`), dan pengiriman HTTP callback serta sync dokumentasi.
 
 #### `getBacklogTasks(): BacklogItem[]`
 - **Peran**: Membaca direktori `BACKLOG_DIR`, mem-parse file `*.meta`, memeriksa keberadaan subfolder `done/`, mencocokkan ID dengan database lokal, dan mengembalikan array `BacklogItem` terurut.

@@ -12,7 +12,7 @@ Variabel lingkungan dikonfigurasi melalui berkas `.env.hub` (disalin dari `.env.
 
 | Variabel | Contoh / Default | Deskripsi & Peran |
 |---|---|---|
-| `SERVER_URL` | `https://msytc.my.id` (atau `http://localhost:3000`) | Base URL server dispatcher (Personal OS) untuk endpoint `/api/agent-dispatcher/claim` dan `/callback`. |
+| `SERVER_URL` | `https://msytc.my.id` (atau `http://localhost:3000`) | Base URL server dispatcher (Personal OS) untuk endpoint `/api/agent-dispatcher/claim`, `/callback`, serta sinkronisasi dokumentasi (`/api/project-docs/sync`). |
 | `AGENT_NAME` | `agent-hub` | Identifier nama worker agen saat mengklaim tugas dan mengirim callback. |
 | `AGY_MODELS` | `gemini-3.7-flash-medium gemini-3.6-flash-medium gemini-3.8-flash-medium` | Daftar nama model (dipisahkan spasi) yang dicoba berurutan saat terjadi quota limit/rate limit. |
 | `AGY_PRINT_TIMEOUT` | `15m` | Nilai parameter timeout output per-langkah (`--print-timeout`) untuk CLI `agy`. |
@@ -156,3 +156,32 @@ Halaman dashboard akan menampilkan:
 - Status antrean lokal (`PENDING`, `RUNNING`, `COMPLETED`, `FAILED`, `UNVERIFIED`, `TIMED_OUT`, `NO_CHANGES`).
 - Daftar backlog file `.meta`.
 - Tombol **"Lihat Log"** untuk inspeksi rinci keluaran terminal tiap tugas.
+
+---
+
+## 6. Alur Doc-Driven Development & Sinkronisasi Dokumentasi
+
+Worker `agent-hub` menerapkan pendekatan **Doc-Driven Development** dalam setiap siklus pengerjaan tugas:
+
+### 1. Injeksi Preamble Tugas (`withDocPreamble`)
+Sebelum eksekusi `agy` dimulai, prompt tugas dibungkus dengan `DOC_DRIVEN_PREAMBLE` untuk memastikan agen membaca dokumentasi repo (`docs/TECH_STACK.md`, `docs/CODE_CONTRACT.md`, `docs/RUNBOOK.md`) dan mematuhi aturan operasional CLI sebelum mengubah kode.
+
+### 2. Penulisan Log Tugas (`docs/LOG.md`)
+Setelah tugas mencapai status `COMPLETED`:
+- Worker membuat atau memperbarui berkas `docs/LOG.md` di repo target menggunakan fungsi `buildLogEntry` dan `appendLogEntry`.
+- Format entri log: `- <ISO timestamp> | <taskRef> | COMPLETED | <commit7> | <n files>`.
+
+### 3. Sinkronisasi Dokumentasi (`syncProjectDocs`)
+- Worker mengekstrak seluruh berkas dokumentasi di folder `docs/` repo target via `collectDocsSections`.
+- Dokumen dikirimkan via HTTP POST ke endpoint `${SERVER_URL}/api/project-docs/sync` bersama parameter `commit_sha`.
+
+### 4. Perilaku Non-Fatal & Penanganan Error
+- Operasi penulisan `docs/LOG.md` dan sinkronisasi dokumentasi `syncProjectDocs` bersifat **non-fatal**.
+- Jika server dispatcher offline, endpoint `/api/project-docs/sync` mengembalikan error HTTP, atau permintaan mengalami timeout (10 detik), error akan dicatat ke log worker sebagai peringatan `[!]` tanpa membatalkan status tugas maupun memutus callback utama.
+
+### 5. Verifikasi Operasional melalui Log
+Anda dapat memantau log service worker (`logs/service.log` atau console) dengan indikator simbol berikut:
+- `[📝]`: Penulisan/pembaruan berkas `docs/LOG.md` berhasil.
+- `[📄]`: Sinkronisasi dokumentasi (`syncProjectDocs`) ke server berhasil.
+- `[ℹ️]`: Folder `docs/` kosong atau tidak ditemukan pada workspace target.
+- `[!]`: Terjadi kesalahan non-fatal saat penulisan log lokal atau sinkronisasi dokumentasi.
