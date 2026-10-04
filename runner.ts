@@ -23,6 +23,9 @@ import {
   extractBacklogRef,
   collectDocsSections,
   withDocPreamble,
+  buildLogEntry,
+  appendLogEntry,
+  isNoiseGitLine,
 } from "./logic";
 
 const execAsync = promisify(exec);
@@ -429,6 +432,43 @@ async function processLocalTasks() {
   });
 
   if (v.status === "COMPLETED") {
+    try {
+      const docsDir = join(targetProject, "docs");
+      if (!fs.existsSync(docsDir)) {
+        fs.mkdirSync(docsDir, { recursive: true });
+      }
+
+      let logFileName = "LOG.md";
+      if (fs.existsSync(docsDir)) {
+        const entries = fs.readdirSync(docsDir);
+        const matched = entries.find((e) => e.toLowerCase() === "log.md");
+        if (matched) logFileName = matched;
+      }
+      const logFilePath = join(docsDir, logFileName);
+      const existingContent = fs.existsSync(logFilePath) ? fs.readFileSync(logFilePath, "utf8") : "# Log\n";
+
+      const changedFilesCount = (gitStatus || "")
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l && !isNoiseGitLine(l)).length;
+
+      const taskRef = task.server_task_ref || task.server_task_id || (task.id ? `#${task.id}` : "-");
+
+      const entry = buildLogEntry({
+        timestamp: new Date().toISOString(),
+        taskRef,
+        verdict: v.status,
+        commit7: gitCommit || "-",
+        numFiles: changedFilesCount,
+      });
+
+      const updatedLog = appendLogEntry(existingContent, entry);
+      fs.writeFileSync(logFilePath, updatedLog, "utf8");
+      log(`[📝] LOG.md diperbarui untuk ${basename(targetProject)}: ${entry}`);
+    } catch (logErr: any) {
+      log(`[!] gagal menulis docs/LOG.md: ${logErr?.message ?? logErr}`);
+    }
+
     await syncProjectDocs(targetProject, gitCommit || undefined);
   }
 

@@ -21,9 +21,10 @@ import {
   getStatusDescription,
   extractBacklogRef,
   collectDocsSections,
-  type DocSection,
   DOC_DRIVEN_PREAMBLE,
   withDocPreamble,
+  buildLogEntry,
+  appendLogEntry,
 } from "./logic";
 
 const io = (files: string[], json?: Record<string, any>) => ({
@@ -578,6 +579,81 @@ describe("withDocPreamble & DOC_DRIVEN_PREAMBLE", () => {
     expect(DOC_DRIVEN_PREAMBLE).toContain("FOREGROUND");
     expect(DOC_DRIVEN_PREAMBLE).toContain("push");
     expect(DOC_DRIVEN_PREAMBLE).toContain("Indonesia");
+  });
+});
+
+describe("buildLogEntry & appendLogEntry", () => {
+  test("skenario 1: buildLogEntry menyusun baris format: - <ISO timestamp> | <taskRef> | <verdict> | <commit7> | <n files>", () => {
+    const entry = buildLogEntry({
+      timestamp: "2026-10-04T09:00:00.000Z",
+      taskRef: "PT-49",
+      verdict: "COMPLETED",
+      commit7: "744846f",
+      numFiles: 3,
+    });
+    expect(entry).toBe("- 2026-10-04T09:00:00.000Z | PT-49 | COMPLETED | 744846f | 3 files");
+  });
+
+  test("skenario 2: buildLogEntry memotong commit > 7 char dan menangani 1 file vs n files", () => {
+    const singleFile = buildLogEntry({
+      timestamp: "2026-10-04T09:00:00.000Z",
+      taskRef: "AW-12",
+      verdict: "COMPLETED",
+      commit: "abcdef1234567890",
+      numFiles: 1,
+    });
+    expect(singleFile).toBe("- 2026-10-04T09:00:00.000Z | AW-12 | COMPLETED | abcdef1 | 1 file");
+
+    const zeroFiles = buildLogEntry({
+      timestamp: "2026-10-04T09:00:00.000Z",
+      taskRef: "TASK-1",
+      verdict: "COMPLETED",
+      numFiles: 0,
+    });
+    expect(zeroFiles).toBe("- 2026-10-04T09:00:00.000Z | TASK-1 | COMPLETED | - | 0 files");
+  });
+
+  test("skenario 3: buildLogEntry menghasilkan timestamp ISO default jika tidak diisi", () => {
+    const entry = buildLogEntry({
+      taskRef: "PT-50",
+      verdict: "COMPLETED",
+      commit7: "a1b2c3d",
+      numFiles: 2,
+    });
+    expect(entry).toMatch(/^- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z \| PT-50 \| COMPLETED \| a1b2c3d \| 2 files$/);
+  });
+
+  test("skenario 4: appendLogEntry dari string kosong", () => {
+    const entry = "- 2026-10-04T09:00:00.000Z | PT-49 | COMPLETED | 744846f | 3 files";
+    const result = appendLogEntry("", entry);
+    expect(result).toBe("- 2026-10-04T09:00:00.000Z | PT-49 | COMPLETED | 744846f | 3 files\n");
+  });
+
+  test("skenario 5: appendLogEntry dari isi lama berakhiran newline", () => {
+    const existing = "# Log\n";
+    const entry = "- 2026-10-04T09:00:00.000Z | PT-49 | COMPLETED | 744846f | 3 files";
+    const result = appendLogEntry(existing, entry);
+    expect(result).toBe("# Log\n- 2026-10-04T09:00:00.000Z | PT-49 | COMPLETED | 744846f | 3 files\n");
+  });
+
+  test("skenario 6: appendLogEntry dari isi lama tanpa newline", () => {
+    const existing = "# Log";
+    const entry = "- 2026-10-04T09:00:00.000Z | PT-49 | COMPLETED | 744846f | 3 files";
+    const result = appendLogEntry(existing, entry);
+    expect(result).toBe("# Log\n- 2026-10-04T09:00:00.000Z | PT-49 | COMPLETED | 744846f | 3 files\n");
+  });
+
+  test("skenario 7: appendLogEntry multi-entri beruntun", () => {
+    const header = "# Log\n";
+    const entry1 = "- 2026-10-04T08:00:00.000Z | PT-48 | COMPLETED | 1111111 | 1 file";
+    const entry2 = "- 2026-10-04T09:00:00.000Z | PT-49 | COMPLETED | 2222222 | 2 files";
+
+    const step1 = appendLogEntry(header, entry1);
+    const step2 = appendLogEntry(step1, entry2);
+
+    expect(step2).toBe(
+      "# Log\n- 2026-10-04T08:00:00.000Z | PT-48 | COMPLETED | 1111111 | 1 file\n- 2026-10-04T09:00:00.000Z | PT-49 | COMPLETED | 2222222 | 2 files\n",
+    );
   });
 });
 

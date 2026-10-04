@@ -511,3 +511,61 @@ export function getStatusDescription(status: string): string {
   return "";
 }
 
+export type LogEntryFields = {
+  timestamp?: string | Date;
+  taskRef?: string;
+  verdict?: string;
+  commit7?: string;
+  commit?: string;
+  numFiles?: number | string;
+  nFiles?: number | string;
+  filesCount?: number | string;
+};
+
+/**
+ * Susun satu baris entri log markdown:
+ * `- <ISO timestamp> | <taskRef> | <verdict> | <commit7> | <n files>`
+ */
+export function buildLogEntry(fields: LogEntryFields): string {
+  const ts = fields.timestamp
+    ? typeof fields.timestamp === "string"
+      ? fields.timestamp
+      : fields.timestamp.toISOString()
+    : new Date().toISOString();
+
+  const taskRef = fields.taskRef && fields.taskRef.trim() ? fields.taskRef.trim() : "-";
+  const verdict = fields.verdict && fields.verdict.trim() ? fields.verdict.trim() : "COMPLETED";
+
+  const rawCommit = (fields.commit7 || fields.commit || "").trim();
+  const commit7 = rawCommit ? (rawCommit.length > 7 ? rawCommit.slice(0, 7) : rawCommit) : "-";
+
+  const rawFiles = fields.numFiles ?? fields.nFiles ?? fields.filesCount ?? 0;
+  let filesStr: string;
+  if (typeof rawFiles === "number") {
+    filesStr = `${rawFiles} ${rawFiles === 1 ? "file" : "files"}`;
+  } else {
+    const trimmed = String(rawFiles).trim();
+    if (/^\d+$/.test(trimmed)) {
+      const count = Number(trimmed);
+      filesStr = `${count} ${count === 1 ? "file" : "files"}`;
+    } else {
+      filesStr = trimmed || "0 files";
+    }
+  }
+
+  return `- ${ts} | ${taskRef} | ${verdict} | ${commit7} | ${filesStr}`;
+}
+
+/**
+ * Tambahkan satu baris entri markdown di akhir dokumen (append-only, pastikan ada newline).
+ */
+export function appendLogEntry(existing: string, entry: string): string {
+  const trimmedEntry = entry.trim();
+  if (!trimmedEntry) return existing;
+  if (!existing || existing.trim() === "") {
+    return trimmedEntry + "\n";
+  }
+  const base = existing.endsWith("\n") ? existing : existing + "\n";
+  return base + trimmedEntry + "\n";
+}
+
