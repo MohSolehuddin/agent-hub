@@ -88,6 +88,25 @@ describe("rotasi model", () => {
     expect(isQuotaError("compilation failed")).toBe(false);
   });
 
+  test("isQuotaError mendeteksi pola throttle opencode & provider", () => {
+    expect(isQuotaError("OpenCode error: 429 Too Many Requests")).toBe(true);
+    expect(isQuotaError("API rate limit exceeded for model")).toBe(true);
+    expect(isQuotaError("Error: rate-limit reached")).toBe(true);
+    expect(isQuotaError("status: rate_limit_exceeded")).toBe(true);
+    expect(isQuotaError("You are being rate limited")).toBe(true);
+    expect(isQuotaError("error: insufficient_quota")).toBe(true);
+    expect(isQuotaError("insufficient quota for current request")).toBe(true);
+    expect(isQuotaError("You have exceeded your current quota")).toBe(true);
+    expect(isQuotaError("out of quota, please upgrade")).toBe(true);
+    expect(isQuotaError("quota limit hit")).toBe(true);
+
+    // Pastikan tidak false-positive pada output kode/test normal
+    expect(isQuotaError("PASS internal/quota/quota_test.go")).toBe(false);
+    expect(isQuotaError("assert user.quota == 5")).toBe(false);
+    expect(isQuotaError("exit status 1: undefined variable")).toBe(false);
+    expect(isQuotaError("syntax error near unexpected token")).toBe(false);
+  });
+
   test("parseResetSeconds membaca 2h15m20s", () => {
     expect(parseResetSeconds("reset in 2h15m20s")).toBe(2 * 3600 + 15 * 60 + 20);
     expect(parseResetSeconds("reset 210.6 mnt -> 2026-09-29 14:42")).toBe(Math.round(210.6 * 60));
@@ -97,20 +116,21 @@ describe("rotasi model", () => {
 });
 
 describe("verdict — exit 0 saja TIDAK cukup", () => {
-  test("agy 0 + gate hijau -> COMPLETED", () => {
+  test("engine 0 + gate hijau -> COMPLETED", () => {
     const v = verdict({ agyExitCode: 0, agyOutput: "done", gate: { ran: true, ok: true }, killed: false });
     expect(v.ok).toBe(true);
     expect(v.status).toBe("COMPLETED");
+    expect(v.reason).toBe("engine sukses & gate hijau");
   });
 
-  test("agy 0 tapi gate MERAH -> FAILED", () => {
+  test("engine 0 tapi gate MERAH -> FAILED", () => {
     const v = verdict({ agyExitCode: 0, agyOutput: "done", gate: { ran: true, ok: false, summary: "GATE GAGAL" }, killed: false });
     expect(v.ok).toBe(false);
     expect(v.status).toBe("FAILED");
     expect(v.reason).toContain("gate");
   });
 
-  test("agy 0 tapi tidak ada gate -> UNVERIFIED (bukan sukses palsu)", () => {
+  test("engine 0 tapi tidak ada gate -> UNVERIFIED (bukan sukses palsu)", () => {
     const v = verdict({ agyExitCode: 0, agyOutput: "done", gate: null, killed: false });
     expect(v.status).toBe("UNVERIFIED");
     expect(v.ok).toBe(false);
@@ -119,11 +139,13 @@ describe("verdict — exit 0 saja TIDAK cukup", () => {
   test("timeout -> TIMED_OUT", () => {
     const v = verdict({ agyExitCode: null, agyOutput: "", gate: null, killed: true });
     expect(v.status).toBe("TIMED_OUT");
+    expect(v.reason).toBe("melewati batas waktu");
   });
 
-  test("agy gagal -> FAILED", () => {
+  test("engine gagal -> FAILED", () => {
     const v = verdict({ agyExitCode: 2, agyOutput: "boom", gate: null, killed: false });
     expect(v.status).toBe("FAILED");
+    expect(v.reason).toBe("engine keluar dengan exit code 2");
   });
 
   // (a) exit 0 + ada perubahan + gate ok -> COMPLETED
@@ -137,7 +159,7 @@ describe("verdict — exit 0 saja TIDAK cukup", () => {
     });
     expect(v.ok).toBe(true);
     expect(v.status).toBe("COMPLETED");
-    expect(v.reason).toBe("agy sukses & gate hijau");
+    expect(v.reason).toBe("engine sukses & gate hijau");
   });
 
   // (b) exit 0 + TIDAK ada perubahan -> bukan COMPLETED (NO_CHANGES)

@@ -231,9 +231,9 @@ export function pickModel(models: string[], tried: string[]): string | null {
   return null;
 }
 
-/** Apakah output agy menandakan kuota habis (bukan error kode)? */
+/** Apakah output engine/CLI menandakan kuota habis (bukan error kode)? */
 export function isQuotaError(text: string): boolean {
-  return /RESOURCE_EXHAUSTED|quota reached|quota exceeded|rate limit|429/i.test(text);
+  return /RESOURCE_EXHAUSTED|quota reached|quota exceeded|quota limit|insufficient[ -_]?quota|out of quota|exceeded.*quota|too many requests|rate[ -_]?limit|rate[ -_]?limited|429/i.test(text);
 }
 
 /** "2h15m20s" / "65.1 mnt" -> detik (null kalau tak ada pola). */
@@ -295,8 +295,8 @@ export function hasGitChanges(beforeStatus: string, afterStatus: string): boolea
 }
 
 /**
- * Putuskan status akhir berdasarkan exit code agy + hasil gate + deteksi perubahan file.
- * ATURAN PENTING: agy exit 0 TIDAK cukup — gate harus hijau dan harus ada perubahan file, kalau tidak -> bukan COMPLETED.
+ * Putuskan status akhir berdasarkan exit code engine/CLI + hasil gate + deteksi perubahan file.
+ * ATURAN PENTING: exit 0 TIDAK cukup — gate harus hijau dan harus ada perubahan file, kalau tidak -> bukan COMPLETED.
  */
 export function verdict(opts: {
   agyExitCode: number | null;
@@ -314,7 +314,7 @@ export function verdict(opts: {
     return { ok: false, status: "TIMED_OUT", reason: "melewati batas waktu" };
   }
   if ((agyExitCode ?? 1) !== 0) {
-    return { ok: false, status: "FAILED", reason: `agy keluar dengan exit code ${agyExitCode}` };
+    return { ok: false, status: "FAILED", reason: `engine keluar dengan exit code ${agyExitCode}` };
   }
   if (!gate || !gate.ran) {
     return { ok: false, status: "UNVERIFIED", reason: "tidak ada gate verifikasi untuk repo ini" };
@@ -325,7 +325,7 @@ export function verdict(opts: {
   if (changed === false) {
     return { ok: false, status: "NO_CHANGES", reason: "tidak ada perubahan file" };
   }
-  return { ok: true, status: "COMPLETED", reason: "agy sukses & gate hijau" };
+  return { ok: true, status: "COMPLETED", reason: "engine sukses & gate hijau" };
 }
 
 /** Ringkas output gate supaya muat di callback (ambil baris penting terakhir). */
