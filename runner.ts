@@ -151,7 +151,8 @@ type CliRun = { code: number | null; stdout: string; stderr: string; killed: boo
 
 function runCli(cmd: string, args: string[], cwd: string, timeoutMs: number): Promise<CliRun> {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd, env: process.env });
+    // engine opencode menggantung bila stdin berupa pipe (menunggu EOF) -> stdin di-ignore
+    const child = spawn(cmd, args, { cwd, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let killed = false;
