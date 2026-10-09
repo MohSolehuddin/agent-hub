@@ -618,7 +618,7 @@ export function buildEngineArgs(opts: {
   opencodeBin?: string;
 }): EngineInvocation {
   if (opts.engine === "opencode") {
-    return { cmd: opts.opencodeBin || "opencode", args: ["run", opts.prompt, "--model", opts.model] };
+    return { cmd: opts.opencodeBin || "opencode", args: ["run", opts.prompt, "--model", opts.model, "--dir", opts.repoDir, "--auto"] };
   }
   return {
     cmd: "agy",

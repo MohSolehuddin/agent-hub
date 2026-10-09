@@ -63,6 +63,7 @@ Set `ENGINE=opencode` pada instance (mis. unit systemd lane terpisah atau shell)
 ENGINE=opencode PORT=4002 bun runner.ts   # jalankan dari cwd lane ini
 curl -s http://localhost:4002/api/health  # field "engine": "opencode"
 ```
+Worker memanggil `opencode run "<prompt>" --model <model> --dir <repo> --auto` (`--dir` mengarahkan kerja ke repo target, bukan cwd lane; `--auto` auto-approve izin).
 Tanpa `ENGINE`, perilaku tetap `agy`.
 
 ---

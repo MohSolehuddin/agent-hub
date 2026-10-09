@@ -725,8 +725,9 @@ describe("buildEngineArgs", () => {
   test("opencode", () => {
     expect(buildEngineArgs({ ...base, engine: "opencode", opencodeBin: "/b/oc" })).toEqual({
       cmd: "/b/oc",
-      args: ["run", "P", "--model", "M"],
+      args: ["run", "P", "--model", "M", "--dir", "/r", "--auto"],
     });
     expect(buildEngineArgs({ ...base, engine: "opencode" }).cmd).toBe("opencode");
+    expect(buildEngineArgs({ ...base, engine: "agy" }).args).not.toContain("--dir");
   });
 });

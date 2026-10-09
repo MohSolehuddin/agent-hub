@@ -117,7 +117,7 @@ type LogEntryFields = {
 - **Peran**: `envBin` (trim) bila non-kosong; jika tidak `${home}/.opencode/bin/opencode` (trailing slash `home` di-strip); bila `home` kosong -> `"opencode"`.
 
 #### `buildEngineArgs(opts: { engine: Engine; prompt: string; model: string; repoDir: string; printTimeout: string; opencodeBin?: string }): EngineInvocation`
-- **Peran**: `opencode` -> `{ cmd: opencodeBin || "opencode", args: ["run", prompt, "--model", model] }`; `agy` -> `{ cmd: "agy", args: ["-p", prompt, "--dangerously-skip-permissions", "--add-dir", repoDir, "--model", model, "--print-timeout", printTimeout] }`.
+- **Peran**: `opencode` -> `{ cmd: opencodeBin || "opencode", args: ["run", prompt, "--model", model, "--dir", repoDir, "--auto"] }` (`--dir` = repo target agar tidak bekerja di cwd proses; `--auto` = auto-approve izin); `agy` -> `{ cmd: "agy", args: ["-p", prompt, "--dangerously-skip-permissions", "--add-dir", repoDir, "--model", model, "--print-timeout", printTimeout] }`.
 
 #### `detectGate(repoDir: string, repoName: string, io: RepoFs): GateSpec | null`
 - **Parameter**:
