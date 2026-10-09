@@ -34,7 +34,7 @@ Sistem memanfaatkan modul bawaan Bun dan standard library Node.js untuk menjaga 
 
 - `bun:sqlite`: Driver database SQLite lokal (`Database`) untuk antrean tugas (`agent_tasks.sqlite`).
 - `bun:test`: Test runner bawaan Bun untuk unit testing logika murni (`logic.test.ts`).
-- `child_process` (`spawn`, `exec`): Eksekutor proses eksternal untuk CLI `agy`, perintah gate verifikasi repo, dan instruksi `git`.
+- `child_process` (`spawn`, `exec`): Eksekutor proses eksternal untuk CLI `agy` (default) atau CLI `opencode` (headless, `opencode run`; eksekutor alternatif via `ENGINE=opencode`, bin absolut `$HOME/.opencode/bin/opencode`), perintah gate verifikasi repo, dan instruksi `git`.
 - `fs` & `path`: Operasi sistem berkas sinkron, manajemen direktori log, dan pembacaan konfigurasi/metadata.
 - `util` (`promisify`): Utilitas promise wrapper untuk eksekusi perintah shell asinkron.
 - Native `fetch`: Global web standard API pada Bun untuk komunikasi HTTP polling/callback ke server dispatcher.

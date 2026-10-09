@@ -26,6 +26,10 @@ import {
   buildLogEntry,
   appendLogEntry,
   isNoiseGitLine,
+  resolveEngine,
+  resolveEngineModels,
+  resolveOpencodeBin,
+  buildEngineArgs,
 } from "./logic";
 
 const execAsync = promisify(exec);
@@ -34,9 +38,12 @@ const execAsync = promisify(exec);
 const SERVER_URL = process.env.SERVER_URL || "http://localhost:3000";
 const WORKER_TOKEN = process.env.AGENT_WORKER_TOKEN || "";
 const AGENT_NAME = process.env.AGENT_NAME || "agent-hub";
-const MODELS = (process.env.AGY_MODELS || "gemini-3.7-flash-medium gemini-3.6-flash-medium gemini-3.8-flash-medium")
-  .split(/\s+/)
-  .filter(Boolean);
+const ENGINE = resolveEngine(process.env.ENGINE);
+const MODELS = resolveEngineModels(ENGINE, {
+  AGY_MODELS: process.env.AGY_MODELS,
+  OPENCODE_MODELS: process.env.OPENCODE_MODELS,
+});
+const OPENCODE_BIN = resolveOpencodeBin(process.env.OPENCODE_BIN, process.env.HOME);
 const PRINT_TIMEOUT = process.env.AGY_PRINT_TIMEOUT || "15m";
 const DEFAULT_TIMEOUT_MIN = Number(process.env.DEFAULT_TIMEOUT_MIN || 30);
 const DEFAULT_WORKSPACE =
@@ -140,18 +147,18 @@ async function runGate(gate: GateSpec, cwd: string) {
 }
 
 // ---------- 3. Jalankan satu tugas ----------
-type AgyRun = { code: number | null; stdout: string; stderr: string; killed: boolean };
+type CliRun = { code: number | null; stdout: string; stderr: string; killed: boolean };
 
-function runAgy(args: string[], cwd: string, timeoutMs: number): Promise<AgyRun> {
+function runCli(cmd: string, args: string[], cwd: string, timeoutMs: number): Promise<CliRun> {
   return new Promise((resolve) => {
-    const child = spawn("agy", args, { cwd, env: process.env });
+    const child = spawn(cmd, args, { cwd, env: process.env });
     let stdout = "";
     let stderr = "";
     let killed = false;
 
     const timer = setTimeout(() => {
       killed = true;
-      log(`[!] timeout ${Math.round(timeoutMs / 60000)} menit -> SIGKILL agy`);
+      log(`[!] timeout ${Math.round(timeoutMs / 60000)} menit -> SIGKILL ${cmd}`);
       child.kill("SIGKILL");
     }, timeoutMs);
 
@@ -340,19 +347,16 @@ async function processLocalTasks() {
     tried.push(model);
     usedModel = model;
 
-    const args = [
-      "-p",
-      withDocPreamble(task.task_prompt),
-      "--dangerously-skip-permissions",
-      "--add-dir",
-      targetProject,
-      "--model",
+    const inv = buildEngineArgs({
+      engine: ENGINE,
+      prompt: withDocPreamble(task.task_prompt),
       model,
-      "--print-timeout",
-      PRINT_TIMEOUT,
-    ];
+      repoDir: targetProject,
+      printTimeout: PRINT_TIMEOUT,
+      opencodeBin: OPENCODE_BIN,
+    });
 
-    const result = await runAgy(args, targetProject, timeoutMs);
+    const result = await runCli(inv.cmd, inv.args, targetProject, timeoutMs);
     stdoutData += result.stdout;
     stderrData += result.stderr;
     agyExitCode = result.code;
@@ -544,13 +548,13 @@ function getBacklogTasks(): BacklogItem[] {
 new Elysia()
   .get("/api/local-tasks", () => db.query(`SELECT * FROM tasks ORDER BY id DESC LIMIT 100`).all())
   .get("/api/backlog", () => getBacklogTasks())
-  .get("/api/health", () => ({ ok: true, agent: AGENT_NAME, models: MODELS, running: isRunning }))
+  .get("/api/health", () => ({ ok: true, agent: AGENT_NAME, engine: ENGINE, models: MODELS, running: isRunning }))
   .get("/", () => Bun.file(DASHBOARD_HTML_PATH))
   .listen(Number(process.env.PORT || 4000));
 
 log(`🚀 [Agent Hub] aktif — dashboard: http://localhost:${process.env.PORT || 4000}`);
 log(`   server: ${SERVER_URL} | agent: ${AGENT_NAME}`);
-log(`   model: ${MODELS.join(", ")} | print-timeout: ${PRINT_TIMEOUT}`);
+log(`   engine: ${ENGINE} | model: ${MODELS.join(", ")} | print-timeout: ${PRINT_TIMEOUT}`);
 log(`   token worker: ${WORKER_TOKEN ? "aktif" : "TIDAK diset (endpoint publik)"}`);
 
 setInterval(fetchTasksFromServer, POLL_MS);

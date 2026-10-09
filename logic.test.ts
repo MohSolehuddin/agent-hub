@@ -661,3 +661,72 @@ describe("buildLogEntry & appendLogEntry", () => {
 
 
 
+
+import {
+  resolveEngine,
+  resolveEngineModels,
+  resolveOpencodeBin,
+  buildEngineArgs,
+  DEFAULT_AGY_MODELS,
+  DEFAULT_OPENCODE_MODELS,
+} from "./logic";
+
+describe("resolveEngine", () => {
+  test("default agy", () => {
+    expect(resolveEngine("")).toBe("agy");
+    expect(resolveEngine("agy")).toBe("agy");
+    expect(resolveEngine("bogus")).toBe("agy");
+    expect(resolveEngine(undefined)).toBe("agy");
+  });
+  test("opencode (trim + case-insensitive)", () => {
+    expect(resolveEngine("opencode")).toBe("opencode");
+    expect(resolveEngine("  OPENCODE  ")).toBe("opencode");
+  });
+});
+
+describe("resolveEngineModels", () => {
+  test("default per-engine (salinan)", () => {
+    expect(resolveEngineModels("agy")).toEqual(DEFAULT_AGY_MODELS);
+    expect(resolveEngineModels("opencode", {})).toEqual(DEFAULT_OPENCODE_MODELS);
+    expect(resolveEngineModels("agy")).not.toBe(DEFAULT_AGY_MODELS);
+  });
+  test("override via env, per engine", () => {
+    expect(resolveEngineModels("opencode", { OPENCODE_MODELS: "a b", AGY_MODELS: "x" })).toEqual(["a", "b"]);
+    expect(resolveEngineModels("agy", { OPENCODE_MODELS: "a", AGY_MODELS: "x y" })).toEqual(["x", "y"]);
+  });
+  test("spasi ganda / kosong", () => {
+    expect(resolveEngineModels("agy", { AGY_MODELS: "  m1   m2  " })).toEqual(["m1", "m2"]);
+    expect(resolveEngineModels("opencode", { OPENCODE_MODELS: "   " })).toEqual(DEFAULT_OPENCODE_MODELS);
+  });
+});
+
+describe("resolveOpencodeBin", () => {
+  test("env menang", () => {
+    expect(resolveOpencodeBin("  /x/oc ", "/home/u")).toBe("/x/oc");
+  });
+  test("default dari home (strip trailing slash)", () => {
+    expect(resolveOpencodeBin(undefined, "/home/u")).toBe("/home/u/.opencode/bin/opencode");
+    expect(resolveOpencodeBin("", "/home/u/")).toBe("/home/u/.opencode/bin/opencode");
+  });
+  test("home kosong -> opencode", () => {
+    expect(resolveOpencodeBin(undefined, "")).toBe("opencode");
+    expect(resolveOpencodeBin()).toBe("opencode");
+  });
+});
+
+describe("buildEngineArgs", () => {
+  const base = { prompt: "P", model: "M", repoDir: "/r", printTimeout: "15m" };
+  test("agy persis seperti sebelumnya", () => {
+    expect(buildEngineArgs({ ...base, engine: "agy" })).toEqual({
+      cmd: "agy",
+      args: ["-p", "P", "--dangerously-skip-permissions", "--add-dir", "/r", "--model", "M", "--print-timeout", "15m"],
+    });
+  });
+  test("opencode", () => {
+    expect(buildEngineArgs({ ...base, engine: "opencode", opencodeBin: "/b/oc" })).toEqual({
+      cmd: "/b/oc",
+      args: ["run", "P", "--model", "M"],
+    });
+    expect(buildEngineArgs({ ...base, engine: "opencode" }).cmd).toBe("opencode");
+  });
+});

@@ -15,6 +15,9 @@ Variabel lingkungan dikonfigurasi melalui berkas `.env.hub` (disalin dari `.env.
 | `SERVER_URL` | `https://msytc.my.id` (atau `http://localhost:3000`) | Base URL server dispatcher (Personal OS) untuk endpoint `/api/agent-dispatcher/claim`, `/callback`, serta sinkronisasi dokumentasi (`/api/project-docs/sync`). |
 | `AGENT_NAME` | `agent-hub` | Identifier nama worker agen saat mengklaim tugas dan mengirim callback. |
 | `AGY_MODELS` | `gemini-3.7-flash-medium gemini-3.6-flash-medium gemini-3.8-flash-medium` | Daftar nama model (dipisahkan spasi) yang dicoba berurutan saat terjadi quota limit/rate limit. |
+| `ENGINE` | `agy` | Engine eksekutor per-instance: `agy` (default) atau `opencode` (`opencode run`). Nilai lain -> `agy`. |
+| `OPENCODE_BIN` | `$HOME/.opencode/bin/opencode` | Path absolut bin `opencode` (tidak ada di PATH). Hanya dipakai bila `ENGINE=opencode`. |
+| `OPENCODE_MODELS` | `opencode/longcat-2.5-preview-free opencode/fledge-alpha-free opencode/muse-spark-1.3-contributor-free opencode/nemotron-3.5-lightning-free` | Daftar model (spasi) untuk engine `opencode`, dirotasi saat quota limit. |
 | `AGY_PRINT_TIMEOUT` | `15m` | Nilai parameter timeout output per-langkah (`--print-timeout`) untuk CLI `agy`. |
 | `DEFAULT_TIMEOUT_MIN` | `30` | Durasi batas waktu eksekusi tugas dalam menit jika server tidak mengirim `timeout_minutes`. |
 | `POLL_MS` | `10000` | Interval polling worker ke server dispatcher dalam satuan milidetik (10 detik). |
@@ -53,6 +56,14 @@ Saat dijalankan, worker akan:
 2. Membuka server Elysia di `http://localhost:4000` (atau sesuai `PORT`).
 3. Memulai polling tugas dari server dispatcher setiap `POLL_MS`.
 4. Memproses antrean tugas lokal satu demi satu secara serial.
+
+### Menjalankan Instance `opencode`
+Set `ENGINE=opencode` pada instance (mis. unit systemd lane terpisah atau shell). Setiap lane memakai `PORT` dan working directory (`WorkingDirectory`) sendiri agar tidak bentrok dengan instance `agy`:
+```bash
+ENGINE=opencode PORT=4002 bun runner.ts   # jalankan dari cwd lane ini
+curl -s http://localhost:4002/api/health  # field "engine": "opencode"
+```
+Tanpa `ENGINE`, perilaku tetap `agy`.
 
 ---
 
@@ -138,6 +149,7 @@ Contoh respons sehat:
 {
   "ok": true,
   "agent": "agent-hub",
+  "engine": "agy",
   "models": [
     "gemini-3.7-flash-medium",
     "gemini-3.6-flash-medium",

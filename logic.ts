@@ -569,3 +569,69 @@ export function appendLogEntry(existing: string, entry: string): string {
   return base + trimmedEntry + "\n";
 }
 
+
+// ---------- Engine (agy | opencode) ----------
+export type Engine = "agy" | "opencode";
+
+export function resolveEngine(envEngine?: string): Engine {
+  return (envEngine ?? "").trim().toLowerCase() === "opencode" ? "opencode" : "agy";
+}
+
+export const DEFAULT_AGY_MODELS: string[] = [
+  "gemini-3.7-flash-medium",
+  "gemini-3.6-flash-medium",
+  "gemini-3.8-flash-medium",
+];
+
+export const DEFAULT_OPENCODE_MODELS: string[] = [
+  "opencode/longcat-2.5-preview-free",
+  "opencode/fledge-alpha-free",
+  "opencode/muse-spark-1.3-contributor-free",
+  "opencode/nemotron-3.5-lightning-free",
+];
+
+export function resolveEngineModels(
+  engine: Engine,
+  env: { AGY_MODELS?: string; OPENCODE_MODELS?: string } = {},
+): string[] {
+  const raw = engine === "opencode" ? env.OPENCODE_MODELS : env.AGY_MODELS;
+  const parsed = (raw ?? "").split(/\s+/).filter(Boolean);
+  if (parsed.length > 0) return parsed;
+  return [...(engine === "opencode" ? DEFAULT_OPENCODE_MODELS : DEFAULT_AGY_MODELS)];
+}
+
+export function resolveOpencodeBin(envBin?: string, home?: string): string {
+  const bin = (envBin ?? "").trim();
+  if (bin) return bin;
+  const h = (home ?? "").trim().replace(/\/+$/, "");
+  return h ? `${h}/.opencode/bin/opencode` : "opencode";
+}
+
+export type EngineInvocation = { cmd: string; args: string[] };
+
+export function buildEngineArgs(opts: {
+  engine: Engine;
+  prompt: string;
+  model: string;
+  repoDir: string;
+  printTimeout: string;
+  opencodeBin?: string;
+}): EngineInvocation {
+  if (opts.engine === "opencode") {
+    return { cmd: opts.opencodeBin || "opencode", args: ["run", opts.prompt, "--model", opts.model] };
+  }
+  return {
+    cmd: "agy",
+    args: [
+      "-p",
+      opts.prompt,
+      "--dangerously-skip-permissions",
+      "--add-dir",
+      opts.repoDir,
+      "--model",
+      opts.model,
+      "--print-timeout",
+      opts.printTimeout,
+    ],
+  };
+}

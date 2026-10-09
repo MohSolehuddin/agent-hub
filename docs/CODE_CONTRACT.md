@@ -30,6 +30,12 @@ Dokumentasi kontrak kode, tipe data, fungsi utama, parameter, nilai balik, serta
 
 ### Tipe Data Utama
 
+#### `Engine`
+`"agy" | "opencode"` — CLI eksekutor yang dipakai worker.
+
+#### `EngineInvocation`
+`{ cmd: string; args: string[] }` — perintah + argumen hasil `buildEngineArgs`.
+
 #### `GateSpec`
 ```ts
 type GateSpec = {
@@ -96,7 +102,22 @@ type LogEntryFields = {
 - `DOCS_SECTIONS_CONFIG`: `Array<{ section: string; filename: string }>` = Pemetaan section dokumentasi ke nama file target (`tech_stack` -> `TECH_STACK.md`, `code_contract` -> `CODE_CONTRACT.md`, `runbook` -> `RUNBOOK.md`, `log` -> `LOG.md`).
 - `DOC_DRIVEN_PREAMBLE`: `string` = Teks panduan operasional CLI dan instruksi Doc-Driven Development yang diinjeksi ke prompt tugas sebelum dijalankan oleh agy.
 
+- `DEFAULT_AGY_MODELS`: `string[]` = `["gemini-3.7-flash-medium","gemini-3.6-flash-medium","gemini-3.8-flash-medium"]`.
+- `DEFAULT_OPENCODE_MODELS`: `string[]` = `["opencode/longcat-2.5-preview-free","opencode/fledge-alpha-free","opencode/muse-spark-1.3-contributor-free","opencode/nemotron-3.5-lightning-free"]`.
+
 ### Fungsi-Fungsi
+
+#### `resolveEngine(envEngine?: string): Engine`
+- **Peran**: trim + lowercase; `"opencode"` -> `"opencode"`, selain itu `"agy"`.
+
+#### `resolveEngineModels(engine: Engine, env?: { AGY_MODELS?: string; OPENCODE_MODELS?: string }): string[]`
+- **Peran**: Memilih env `OPENCODE_MODELS` / `AGY_MODELS` sesuai engine, dipisah whitespace; bila kosong mengembalikan salinan default engine tersebut.
+
+#### `resolveOpencodeBin(envBin?: string, home?: string): string`
+- **Peran**: `envBin` (trim) bila non-kosong; jika tidak `${home}/.opencode/bin/opencode` (trailing slash `home` di-strip); bila `home` kosong -> `"opencode"`.
+
+#### `buildEngineArgs(opts: { engine: Engine; prompt: string; model: string; repoDir: string; printTimeout: string; opencodeBin?: string }): EngineInvocation`
+- **Peran**: `opencode` -> `{ cmd: opencodeBin || "opencode", args: ["run", prompt, "--model", model] }`; `agy` -> `{ cmd: "agy", args: ["-p", prompt, "--dangerously-skip-permissions", "--add-dir", repoDir, "--model", model, "--print-timeout", printTimeout] }`.
 
 #### `detectGate(repoDir: string, repoName: string, io: RepoFs): GateSpec | null`
 - **Parameter**:
@@ -229,7 +250,7 @@ type LogEntryFields = {
 ## 3. Modul Runner & Service (`runner.ts`)
 
 ### Tipe Data
-- `AgyRun`: `{ code: number | null; stdout: string; stderr: string; killed: boolean }`
+- `CliRun`: `{ code: number | null; stdout: string; stderr: string; killed: boolean }`
 
 ### Fungsi / Prosedur Internal
 
@@ -247,8 +268,8 @@ type LogEntryFields = {
 - **Peran**: Menjalankan setiap perintah verifikasi gate secara serial di direktori `cwd` via `execAsync` (buffer 8MB, timeout 10 menit).
 - **Efek Samping**: Mengeksekusi proses shell eksternal; berhenti pada kegagalan pertama.
 
-#### `runAgy(args: string[], cwd: string, timeoutMs: number): Promise<AgyRun>`
-- **Peran**: Menjalankan child process `spawn("agy", args, ...)` di folder target dengan batas waktu `timeoutMs`.
+#### `runCli(cmd: string, args: string[], cwd: string, timeoutMs: number): Promise<CliRun>`
+- **Peran**: Menjalankan child process `spawn(cmd, args, ...)` (cmd = `agy` atau bin `opencode`) di folder target dengan batas waktu `timeoutMs`.
 - **Efek Samping**: Mengirim sinyal `SIGKILL` bila waktu eksekusi melampaui batas; mengumpulkan stream `stdout` dan `stderr`.
 
 #### `appendQuota(model: string, resetSeconds: number | null): void`
@@ -276,5 +297,5 @@ type LogEntryFields = {
 ### HTTP Endpoints (Elysia Server)
 - `GET /api/local-tasks`: Mengembalikan 100 entri tugas terakhir dari tabel `tasks` SQLite lokal.
 - `GET /api/backlog`: Mengembalikan daftar backlog item dari direktori `BACKLOG_DIR`.
-- `GET /api/health`: Mengembalikan status kesehatan worker `{ ok: true, agent, models, running }`.
+- `GET /api/health`: Mengembalikan status kesehatan worker `{ ok: true, agent, engine, models, running }`.
 - `GET /`: Menyajikan berkas static frontend `public/index.html`.
