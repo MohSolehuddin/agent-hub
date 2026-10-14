@@ -46,9 +46,10 @@ const MODELS = resolveEngineModels(ENGINE, {
 const OPENCODE_BIN = resolveOpencodeBin(process.env.OPENCODE_BIN, process.env.HOME);
 const PRINT_TIMEOUT = process.env.AGY_PRINT_TIMEOUT || "15m";
 const DEFAULT_TIMEOUT_MIN = Number(process.env.DEFAULT_TIMEOUT_MIN || 30);
+const HOME_DIR = process.env.HOME || "/home/msytc";
 const DEFAULT_WORKSPACE =
-  process.env.DEFAULT_WORKSPACE || join(process.env.HOME || "/home/msytc", "project/have-fun/personal-tools");
-const BACKLOG_DIR = process.env.BACKLOG_DIR || "/home/msytc/hermes-work/review-loop/tasks";
+  process.env.DEFAULT_WORKSPACE || join(HOME_DIR, "project/have-fun/personal-tools");
+const BACKLOG_DIR = process.env.BACKLOG_DIR || join(HOME_DIR, "hermes-work/review-loop/tasks");
 const POLL_MS = Number(process.env.POLL_MS || 10000);
 const LOG_DIR = resolveLogDir(process.env.LOG_DIR, process.cwd());
 const DASHBOARD_HTML_PATH = resolveDashboardPath(import.meta.dir);
@@ -240,7 +241,10 @@ async function finish(
         error: r.error,
       }),
     });
-    if (!res.ok) log(`[!] callback gagal: HTTP ${res.status}`);
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      log(`[!] callback gagal: HTTP ${res.status} ${res.statusText} | ${body.slice(0, 200)}`);
+    }
   } catch (e: any) {
     log(`[!] callback error: ${e?.message ?? e}`);
   }
@@ -309,11 +313,14 @@ async function processLocalTasks() {
   log(`[⚙️] Mulai tugas lokal #${task.id} (server: ${task.server_task_id}) di ${targetProject}`);
 
   if (!fs.existsSync(targetProject)) {
+    const hint = targetProject === DEFAULT_WORKSPACE
+      ? ` (DEFAULT_WORKSPACE=${DEFAULT_WORKSPACE}). Set env DEFAULT_WORKSPACE atau buat foldernya.`
+      : "";
     await finish(task, {
       status: "FAILED",
       exitCode: 1,
       outputTail: "",
-      error: `Workspace tidak ditemukan: ${targetProject}`,
+      error: `Workspace tidak ditemukan: ${targetProject}${hint}`,
       t0,
       startedAt,
       project: targetProject,
@@ -556,6 +563,7 @@ new Elysia()
 log(`🚀 [Agent Hub] aktif — dashboard: http://localhost:${process.env.PORT || 4000}`);
 log(`   server: ${SERVER_URL} | agent: ${AGENT_NAME}`);
 log(`   engine: ${ENGINE} | model: ${MODELS.join(", ")} | print-timeout: ${PRINT_TIMEOUT}`);
+log(`   workspace: ${DEFAULT_WORKSPACE} | backlog: ${BACKLOG_DIR}`);
 log(`   token worker: ${WORKER_TOKEN ? "aktif" : "TIDAK diset (endpoint publik)"}`);
 
 setInterval(fetchTasksFromServer, POLL_MS);

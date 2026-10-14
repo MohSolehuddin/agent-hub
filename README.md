@@ -39,6 +39,8 @@ bun add elysia
 | `DEFAULT_TIMEOUT_MIN` | `30` | timeout default bila payload tidak mengisi `timeout_minutes` |
 | `POLL_MS` | `10000` | interval klaim tugas |
 | `PORT` | `4000` | dashboard lokal |
+| `DEFAULT_WORKSPACE` | `$HOME/project/have-fun/personal-tools` | workspace default bila `target_project` tidak diset |
+| `BACKLOG_DIR` | `$HOME/hermes-work/review-loop/tasks` | direktori backlog untuk `GET /api/backlog` |
 
 Server harus punya `POST /api/agent-dispatcher/claim` (ambil + kunci tugas) dan
 `POST /api/agent-dispatcher/callback` (terima hasil) — keduanya sudah tersedia di personal-tools.
