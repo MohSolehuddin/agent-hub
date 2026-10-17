@@ -338,12 +338,75 @@ export function summarizeGateOutput(cmd: string, ok: boolean, output: string, ma
 
 export const CLAIM_RETRY_DELAYS = [1000, 2000, 4000];
 
+/** Backoff maksimum antar siklus poll klaim (5 menit). */
+export const CLAIM_MAX_BACKOFF_MS = 5 * 60 * 1000;
+
 /**
  * Cek apakah status HTTP tergolong kegagalan gateway / server sementara
  * yang layak di-retry (502, 503, 504). Status 4xx (mis. 401) JANGAN di-retry.
  */
 export function isRetryableHttpStatus(status: number): boolean {
   return status === 502 || status === 503 || status === 504;
+}
+
+/**
+ * Cek status throttle (429 Too Many Requests). Ditangani lewat cooldown antar
+ * siklus poll, bukan retry cepat di dalam siklus yang sama.
+ */
+export function isThrottledStatus(status: number): boolean {
+  return status === 429;
+}
+
+/**
+ * Parser murni header `Retry-After` (detik). Mengembalikan null bila kosong,
+ * bukan angka, atau di luar rentang wajar (0..3600 detik).
+ */
+export function parseRetryAfterSeconds(value: string | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  const trimmed = String(value).trim();
+  if (trimmed === "") return null;
+  const seconds = Number(trimmed);
+  if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 3600) return null;
+  return Math.ceil(seconds);
+}
+
+/**
+ * Menghitung jeda sebelum siklus poll berikutnya (ms).
+ *
+ * Aturan:
+ *  - failures <= 0 (sukses)      -> baseMs (jeda normal).
+ *  - failures  > 0 (gagal/throttle) -> baseMs * 2^failures, dibatasi maxMs,
+ *    lalu ditambah jitter 0..25% agar 4 lane tidak menabrak server serempak.
+ *  - Retry-After dari server dihormati: hasil akhir = max(retryAfter, backoff),
+ *    tetap dibatasi maxMs.
+ *  - `random` bisa di-inject (default Math.random) sehingga perilaku deterministik
+ *    saat unit test (random = () => 0 berarti tanpa jitter).
+ */
+export function nextClaimDelayMs(opts: {
+  baseMs: number;
+  failures: number;
+  retryAfterSeconds?: number | null;
+  maxMs?: number;
+  random?: () => number;
+}): number {
+  const baseMs = Number.isFinite(opts.baseMs) && opts.baseMs > 0 ? opts.baseMs : 10_000;
+  const maxMs = Number.isFinite(opts.maxMs) && (opts.maxMs as number) > 0 ? (opts.maxMs as number) : CLAIM_MAX_BACKOFF_MS;
+  const failures = Number.isFinite(opts.failures) && opts.failures > 0 ? Math.floor(opts.failures) : 0;
+  const random = opts.random ?? Math.random;
+
+  if (failures === 0) return Math.min(baseMs, maxMs);
+
+  // 2^failures dibatasi supaya tidak overflow sebelum di-clamp.
+  const exp = Math.min(failures, 20);
+  let delay = Math.min(baseMs * Math.pow(2, exp), maxMs);
+
+  const jitter = delay * 0.25 * random();
+  delay = Math.min(delay + jitter, maxMs);
+
+  const retryAfterMs = (opts.retryAfterSeconds ?? 0) * 1000;
+  if (retryAfterMs > delay) delay = Math.min(retryAfterMs, maxMs);
+
+  return Math.round(delay);
 }
 
 /**

@@ -7,7 +7,11 @@ import {
   verdict,
   summarizeGateOutput,
   CLAIM_RETRY_DELAYS,
+  CLAIM_MAX_BACKOFF_MS,
   isRetryableHttpStatus,
+  isThrottledStatus,
+  parseRetryAfterSeconds,
+  nextClaimDelayMs,
   parseMetaContent,
   resolveBacklogStatus,
   parseBacklogMeta,
@@ -751,5 +755,58 @@ describe("buildEngineArgs", () => {
     });
     expect(buildEngineArgs({ ...base, engine: "opencode" }).cmd).toBe("opencode");
     expect(buildEngineArgs({ ...base, engine: "agy" }).args).not.toContain("--dir");
+  });
+});
+
+describe("poller backoff (claim)", () => {
+  test("isThrottledStatus hanya 429", () => {
+    expect(isThrottledStatus(429)).toBe(true);
+    expect(isThrottledStatus(500)).toBe(false);
+    expect(isThrottledStatus(200)).toBe(false);
+  });
+
+  test("parseRetryAfterSeconds: valid, kosong, dan di luar rentang", () => {
+    expect(parseRetryAfterSeconds("30")).toBe(30);
+    expect(parseRetryAfterSeconds(" 7 ")).toBe(7);
+    expect(parseRetryAfterSeconds("0.4")).toBe(1);
+    expect(parseRetryAfterSeconds(null)).toBeNull();
+    expect(parseRetryAfterSeconds(undefined)).toBeNull();
+    expect(parseRetryAfterSeconds("")).toBeNull();
+    expect(parseRetryAfterSeconds("abc")).toBeNull();
+    expect(parseRetryAfterSeconds("-5")).toBeNull();
+    expect(parseRetryAfterSeconds("99999")).toBeNull();
+  });
+
+  test("sukses -> jeda normal (baseMs)", () => {
+    expect(nextClaimDelayMs({ baseMs: 10_000, failures: 0, random: () => 0.9 })).toBe(10_000);
+  });
+
+  test("gagal berulang -> backoff eksponensial, dibatasi maxMs", () => {
+    const base = { baseMs: 10_000, random: () => 0 };
+    expect(nextClaimDelayMs({ ...base, failures: 1 })).toBe(20_000);
+    expect(nextClaimDelayMs({ ...base, failures: 2 })).toBe(40_000);
+    expect(nextClaimDelayMs({ ...base, failures: 3 })).toBe(80_000);
+    // failures besar -> mentok maxMs (bukan meledak)
+    expect(nextClaimDelayMs({ ...base, failures: 20 })).toBe(CLAIM_MAX_BACKOFF_MS);
+    expect(nextClaimDelayMs({ ...base, failures: 4, maxMs: 60_000 })).toBe(60_000);
+  });
+
+  test("jitter menambah maksimal 25%", () => {
+    const noJitter = nextClaimDelayMs({ baseMs: 10_000, failures: 1, random: () => 0 });
+    const fullJitter = nextClaimDelayMs({ baseMs: 10_000, failures: 1, random: () => 1 });
+    expect(fullJitter).toBe(Math.round(noJitter * 1.25));
+  });
+
+  test("Retry-After dihormati bila lebih besar dari backoff", () => {
+    expect(nextClaimDelayMs({ baseMs: 10_000, failures: 1, retryAfterSeconds: 45, random: () => 0 })).toBe(45_000);
+    // Retry-After kecil tidak menurunkan backoff
+    expect(nextClaimDelayMs({ baseMs: 10_000, failures: 3, retryAfterSeconds: 5, random: () => 0 })).toBe(80_000);
+    // Retry-After tetap dibatasi maxMs
+    expect(nextClaimDelayMs({ baseMs: 10_000, failures: 1, retryAfterSeconds: 3600, maxMs: 60_000, random: () => 0 })).toBe(60_000);
+  });
+
+  test("input tidak masuk akal tetap aman (tidak NaN)", () => {
+    expect(nextClaimDelayMs({ baseMs: NaN, failures: -3 })).toBe(10_000);
+    expect(Number.isFinite(nextClaimDelayMs({ baseMs: 0, failures: 1.7, random: () => 0 }))).toBe(true);
   });
 });

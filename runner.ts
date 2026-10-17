@@ -13,7 +13,11 @@ import {
   summarizeGateOutput,
   type GateSpec,
   CLAIM_RETRY_DELAYS,
+  CLAIM_MAX_BACKOFF_MS,
   isRetryableHttpStatus,
+  isThrottledStatus,
+  parseRetryAfterSeconds,
+  nextClaimDelayMs,
   parseBacklogMeta,
   resolveBacklogStatus,
   type BacklogItem,
@@ -67,7 +71,21 @@ function authHeaders(): Record<string, string> {
 }
 
 // ---------- 1. Ambil tugas (klaim atomik dari server) ----------
-async function fetchTasksFromServer() {
+//
+// Mengembalikan outcome siklus poll supaya pemanggil bisa mengatur backoff:
+//
+//	ok       : true bila server membalas 200 (siklus sehat, walau tidak ada tugas)
+//	status   : kode HTTP terakhir bila gagal
+//	claimed  : true bila satu tugas berhasil diklaim
+//	retryAfter: nilai header Retry-After (detik) bila server mengirimkannya
+type ClaimOutcome = {
+  ok: boolean;
+  status?: number;
+  claimed: boolean;
+  retryAfterSeconds?: number | null;
+};
+
+async function fetchTasksFromServer(): Promise<ClaimOutcome> {
   for (let attempt = 0; attempt <= CLAIM_RETRY_DELAYS.length; attempt++) {
     try {
       const res = await fetch(`${SERVER_URL}/api/agent-dispatcher/claim`, {
@@ -76,6 +94,15 @@ async function fetchTasksFromServer() {
         body: JSON.stringify({ agent: AGENT_NAME }),
       });
       if (!res.ok) {
+        const retryAfterSeconds = parseRetryAfterSeconds(res.headers.get("Retry-After"));
+
+        // 429 (throttle) TIDAK di-retry cepat di siklus yang sama — poller menyerahkan
+        // pengaturan jeda ke cooldown antar-siklus (lihat pollOnce), supaya tidak
+        // memperparah limpahan request ke server.
+        if (isThrottledStatus(res.status)) {
+          return { ok: false, status: res.status, claimed: false, retryAfterSeconds };
+        }
+
         if (isRetryableHttpStatus(res.status) && attempt < CLAIM_RETRY_DELAYS.length) {
           const delayMs = CLAIM_RETRY_DELAYS[attempt];
           log(
@@ -84,12 +111,11 @@ async function fetchTasksFromServer() {
           await new Promise((r) => setTimeout(r, delayMs));
           continue;
         }
-        log(`[!] claim gagal: HTTP ${res.status} ${res.statusText}`);
-        return;
+        return { ok: false, status: res.status, claimed: false, retryAfterSeconds };
       }
 
       const data: any = await res.json();
-      if (!data?.has_task || !data?.task) return;
+      if (!data?.has_task || !data?.task) return { ok: true, status: res.status, claimed: false };
 
       const t = data.task;
       const project = t.project_path || DEFAULT_WORKSPACE;
@@ -100,7 +126,7 @@ async function fetchTasksFromServer() {
         [t.prompt, project, t.task_id ?? null, serverTaskRef, Number(t.timeout_minutes) || DEFAULT_TIMEOUT_MIN],
       );
       log(`[⬇️] Tugas ${t.task_id} diklaim dari server (repo: ${project})`);
-      return;
+      return { ok: true, status: res.status, claimed: true };
     } catch (err: any) {
       if (attempt < CLAIM_RETRY_DELAYS.length) {
         const delayMs = CLAIM_RETRY_DELAYS[attempt];
@@ -111,8 +137,10 @@ async function fetchTasksFromServer() {
         continue;
       }
       log(`[!] claim error: ${err?.message ?? err}`);
+      return { ok: false, claimed: false };
     }
   }
+  return { ok: false, claimed: false };
 }
 
 // ---------- 2. Gate verifikasi ----------
@@ -566,5 +594,42 @@ log(`   engine: ${ENGINE} | model: ${MODELS.join(", ")} | print-timeout: ${PRINT
 log(`   workspace: ${DEFAULT_WORKSPACE} | backlog: ${BACKLOG_DIR}`);
 log(`   token worker: ${WORKER_TOKEN ? "aktif" : "TIDAK diset (endpoint publik)"}`);
 
-setInterval(fetchTasksFromServer, POLL_MS);
+// Poller self-scheduling: jeda dihitung ulang setiap siklus sehingga kegagalan
+// (429/502/503/504/jaringan) memicu backoff eksponensial + jitter, bukan tembakan
+// tetap tiap POLL_MS. Ini mencegah 4 lane membanjiri /claim saat server sedang
+// membatasi request, dan menghormati header Retry-After bila ada.
+let consecutiveClaimFailures = 0;
+
+function shouldLogClaimFailure(failures: number): boolean {
+  // Log pada kegagalan ke-1, lalu 2, 4, 8, ... supaya log tidak membanjir selama outage.
+  return failures === 1 || (failures & (failures - 1)) === 0;
+}
+
+async function pollOnce(): Promise<void> {
+  const outcome = await fetchTasksFromServer();
+
+  if (outcome.ok) {
+    if (consecutiveClaimFailures > 0) {
+      log(`[✓] claim kembali normal setelah ${consecutiveClaimFailures} kegagalan berturut-turut`);
+    }
+    consecutiveClaimFailures = 0;
+  } else {
+    consecutiveClaimFailures++;
+    if (shouldLogClaimFailure(consecutiveClaimFailures)) {
+      const detail = outcome.status ? `HTTP ${outcome.status}` : "error jaringan";
+      log(`[!] claim gagal (${detail}) — kegagalan berturut-turut ${consecutiveClaimFailures}, poll berikutnya ditunda (backoff)`);
+    }
+  }
+
+  const delayMs = nextClaimDelayMs({
+    baseMs: POLL_MS,
+    failures: consecutiveClaimFailures,
+    retryAfterSeconds: outcome.retryAfterSeconds,
+    maxMs: CLAIM_MAX_BACKOFF_MS,
+  });
+
+  setTimeout(pollOnce, delayMs);
+}
+
+void pollOnce();
 setInterval(processLocalTasks, 3000);
