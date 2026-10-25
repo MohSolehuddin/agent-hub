@@ -738,6 +738,33 @@ export function parseBacklogMeta(id: string, content: string, status: string): B
 }
 
 /**
+ * Redaksi secret yang umum muncul di output CLI sebelum disimpan/dikirim.
+ * Nilai diganti penanda agar tidak ada token mentah di log, SQLite, atau callback.
+ */
+export function redactSecrets(text: string): string {
+  if (!text) return text;
+
+  const patterns: Array<[RegExp, string]> = [
+    [/sk-[A-Za-z0-9_-]{20,}/g, "[REDACTED:openai]"],
+    [/AIza[0-9A-Za-z_-]{35}/g, "[REDACTED:google]"],
+    [/gh[pousr]_[A-Za-z0-9]{30,}/g, "[REDACTED:github]"],
+    [/AKIA[0-9A-Z]{16}/g, "[REDACTED:aws]"],
+    [/xox[baprs]-[A-Za-z0-9-]{10,}/g, "[REDACTED:slack]"],
+    [/eyJhbGciOi[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[REDACTED:jwt]"],
+  ];
+
+  let out = text;
+  for (const [re, replacement] of patterns) {
+    out = out.replace(re, replacement);
+  }
+
+  return out.replace(
+    /\b[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Za-z0-9_]*\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^\s"'`]+)/gi,
+    (match) => `${match.split("=")[0].trim()}=[REDACTED]`,
+  );
+}
+
+/**
  * Resolusi path database SQLite lokal.
  * Default relatif ke cwd ("agent_tasks.sqlite") agar setiap lane yang berjalan di direktori berbeda
  * memiliki antrean lokal sendiri, dan bisa di-override via env DB_PATH.

@@ -40,6 +40,7 @@ import {
   readGateConfigFingerprint,
   resolveGateAfterRun,
   splitCommand,
+  redactSecrets,
 } from "./logic";
 
 const execAsync = promisify(exec);
@@ -65,6 +66,8 @@ const LOG_DIR = resolveLogDir(process.env.LOG_DIR, process.cwd());
 const DASHBOARD_HTML_PATH = resolveDashboardPath(import.meta.dir);
 const PROJECT_ALLOW_PREFIXES = parseAllowPrefixes(process.env.PROJECT_ALLOW_PREFIXES);
 const ALLOWED_GATE_COMMANDS = resolveAllowedGateCommands(process.env.GATE_ALLOW_EXTRA);
+const HUB_HOST = process.env.HUB_HOST || "127.0.0.1";
+const HUB_TOKEN = process.env.HUB_TOKEN || "";
 
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 
@@ -76,6 +79,13 @@ function authHeaders(): Record<string, string> {
   const h: Record<string, string> = { "Content-Type": "application/json" };
   if (WORKER_TOKEN) h["X-Worker-Token"] = WORKER_TOKEN;
   return h;
+}
+
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }
 
 // ---------- 1. Ambil tugas (klaim atomik dari server) ----------
@@ -273,19 +283,21 @@ async function finish(
   const durationMs = Date.now() - r.t0;
   const completedAt = new Date();
   const logPath = join(LOG_DIR, `${task.server_task_id || task.id}.log`);
+  const safeTail = redactSecrets(r.outputTail);
+  const safeError = redactSecrets(r.error);
 
   try {
-    fs.writeFileSync(logPath, r.outputTail);
+    fs.writeFileSync(logPath, safeTail);
   } catch (e: any) {
     log(`[!] gagal menulis log: ${e?.message ?? e}`);
   }
 
   db.run(
     `UPDATE tasks SET status = ?, stdout = ?, stderr = ?, model_used = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-    [r.status, r.outputTail, r.error, r.gitCommit ?? "", task.id],
+    [r.status, safeTail, safeError, r.gitCommit ?? "", task.id],
   );
 
-  log(`[${r.status === "COMPLETED" ? "✅" : "❌"}] tugas #${task.id} -> ${r.status} (${Math.round(durationMs / 1000)}s) ${r.error}`);
+  log(`[${r.status === "COMPLETED" ? "✅" : "❌"}] tugas #${task.id} -> ${r.status} (${Math.round(durationMs / 1000)}s) ${safeError}`);
 
   const serverTaskId = task.server_task_id;
   if (!serverTaskId) return;
@@ -302,12 +314,12 @@ async function finish(
         prompt: task.task_prompt,
         project_path: r.project,
         full_log_path: logPath,
-        output_tail: r.outputTail,
+        output_tail: safeTail,
         git_commit: r.gitCommit ?? "",
         duration_ms: durationMs,
         started_at: r.startedAt.toISOString(),
         completed_at: completedAt.toISOString(),
-        error: r.error,
+        error: safeError,
       }),
     });
     if (!res.ok) {
@@ -654,11 +666,31 @@ function getBacklogTasks(): BacklogItem[] {
 }
 
 new Elysia()
+  .onBeforeHandle(({ request, set }) => {
+    if (!HUB_TOKEN) return;
+    const url = new URL(request.url);
+    if (!url.pathname.startsWith("/api/") || url.pathname === "/api/health") return;
+
+    const auth = request.headers.get("authorization") || "";
+    const bearer = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
+    const queryToken = url.searchParams.get("token") || "";
+    const headerOk = timingSafeEqual(bearer, HUB_TOKEN);
+    const queryOk = timingSafeEqual(queryToken, HUB_TOKEN);
+
+    if (!headerOk && !queryOk) {
+      set.status = 401;
+      return { error: "unauthorized" };
+    }
+  })
   .get("/api/local-tasks", () => db.query(`SELECT * FROM tasks ORDER BY id DESC LIMIT 100`).all())
   .get("/api/backlog", () => getBacklogTasks())
   .get("/api/health", () => ({ ok: true, agent: AGENT_NAME, engine: ENGINE, models: MODELS, running: isRunning }))
   .get("/", () => Bun.file(DASHBOARD_HTML_PATH))
-  .listen(Number(process.env.PORT || 4000));
+  .listen({ port: Number(process.env.PORT || 4000), hostname: HUB_HOST });
+
+if (!HUB_TOKEN) {
+  log("[!] HUB_TOKEN kosong: API lokal terbuka untuk siapa pun yang bisa menjangkau 127.0.0.1");
+}
 
 log(`🚀 [Agent Hub] aktif — dashboard: http://localhost:${process.env.PORT || 4000}`);
 log(`   server: ${SERVER_URL} | agent: ${AGENT_NAME}`);

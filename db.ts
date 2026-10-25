@@ -1,11 +1,22 @@
 import { Database } from "bun:sqlite";
+import { chmodSync } from "fs";
 import { resolveDbPath } from "./logic";
 
 // Membuka/membuat database lokal agent-hub.
 // TETAP relatif ke cwd secara default ("agent_tasks.sqlite") agar setiap lane yang
 // dijalankan dari direktori terpisah memiliki antrean lokal sendiri.
 // Mendukung override path via env DB_PATH bila diset.
-export const db = new Database(resolveDbPath(process.env.DB_PATH), { create: true });
+const DB_PATH = resolveDbPath(process.env.DB_PATH);
+export const db = new Database(DB_PATH, { create: true });
+
+// Batasi akses berkas DB ke pemilik (best-effort; Windows tidak mendukung mode POSIX).
+if (process.platform !== "win32") {
+  try {
+    chmodSync(DB_PATH, 0o600);
+  } catch {
+    // abaikan bila filesystem tidak mendukung chmod
+  }
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS tasks (

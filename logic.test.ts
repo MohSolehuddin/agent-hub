@@ -39,6 +39,7 @@ import {
   splitCommand,
   readGateConfigFingerprint,
   resolveGateAfterRun,
+  redactSecrets,
   type GateSpec,
 } from "./logic";
 
@@ -1018,5 +1019,72 @@ describe("helper tambahan", () => {
     const fp = readGateConfigFingerprint("/repo", fakeIo as any);
     expect(typeof fp).toBe("string");
     expect(readGateConfigFingerprint("/no-such-repo", fakeIo as any)).toBeNull();
+  });
+});
+
+describe("redactSecrets", () => {
+  test("meredaksi OpenAI/Anthropic style sk-", () => {
+    expect(redactSecrets("pakai sk-proj-AbCdEf0123456789xyzABCDE ya")).toBe("pakai [REDACTED:openai] ya");
+  });
+
+  test("meredaksi Google API key", () => {
+    const token = "AIza" + "B".repeat(35);
+    expect(redactSecrets(`google ${token}`)).toBe("google [REDACTED:google]");
+  });
+
+  test("meredaksi GitHub token", () => {
+    const token = "ghp_" + "a".repeat(36);
+    expect(redactSecrets(`github ${token}`)).toBe("github [REDACTED:github]");
+  });
+
+  test("meredaksi AWS access key", () => {
+    expect(redactSecrets("aws AKIAIOSFODNN7EXAMPLE")).toBe("aws [REDACTED:aws]");
+  });
+
+  test("meredaksi Slack token", () => {
+    expect(redactSecrets("slack xoxb-1234567890-abcdefghij")).toBe("slack [REDACTED:slack]");
+  });
+
+  test("meredaksi JWT utuh", () => {
+    const jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature_abc-123";
+    const out = redactSecrets(`Authorization: Bearer ${jwt}`);
+    expect(out).toBe("Authorization: Bearer [REDACTED:jwt]");
+    expect(out).not.toContain(jwt);
+  });
+
+  test("KEY=value mempertahankan nama variabel", () => {
+    const out = redactSecrets("OPENAI_API_KEY=supersecret123\nTOKEN=abc\nDB_PASSWORD=hunter2\nMY_SECRET=xyz");
+    expect(out).toContain("OPENAI_API_KEY=[REDACTED]");
+    expect(out).toContain("TOKEN=[REDACTED]");
+    expect(out).toContain("DB_PASSWORD=[REDACTED]");
+    expect(out).toContain("MY_SECRET=[REDACTED]");
+    expect(out).not.toContain("supersecret123");
+    expect(out).not.toContain("hunter2");
+  });
+
+  test("teks tanpa secret tidak berubah", () => {
+    const text = "build sukses\nsemua file aman";
+    expect(redactSecrets(text)).toBe(text);
+  });
+
+  test("dua secret dalam satu baris ikut diredaksi semua", () => {
+    const raw = "sk-abcdefghijklmnopqrstuvwx lalu ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+    expect(redactSecrets(raw)).toBe("[REDACTED:openai] lalu [REDACTED:github]");
+  });
+
+  test("output akhir tidak mengandung substring secret asli", () => {
+    const secrets = [
+      "sk-proj-AbCdEf0123456789xyzABCDE",
+      "AIza" + "B".repeat(35),
+      "ghp_" + "a".repeat(36),
+      "AKIAIOSFODNN7EXAMPLE",
+      "xoxb-1234567890-abcdefghij",
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature_abc-123",
+    ];
+    const out = redactSecrets(`OPENAI_API_KEY=supersecret123 ${secrets.join(" ")}`);
+    for (const secret of secrets) {
+      expect(out).not.toContain(secret);
+    }
+    expect(out).not.toContain("supersecret123");
   });
 });

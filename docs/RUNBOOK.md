@@ -31,7 +31,11 @@ Variabel lingkungan dikonfigurasi melalui berkas `.env.hub` (disalin dari `.env.
 | `DEFAULT_WORKSPACE` | `$HOME/project/have-fun/personal-tools` | Direktori workspace default bila payload tugas server tidak menentukan `project_path`. |
 | `BACKLOG_DIR` | `/home/msytc/hermes-work/review-loop/tasks` | Lokasi direktori pembacaan file tugas `*.meta`. |
 | `LOG_DIR` | `<cwd>/logs` | Lokasi penyimpanan berkas log eksekusi (`<id>.log`) dan `quota.jsonl`. |
-| `DB_PATH` | `agent_tasks.sqlite` | Path database SQLite lokal antrean tugas. |
+| `DB_PATH` | `agent_tasks.sqlite` | Path database SQLite lokal antrean tugas (mode berkas `0600` bila platform mendukung). |
+| `HUB_HOST` | `127.0.0.1` | Alamat bind HTTP dashboard/API lokal. Default loopback agar tidak terbuka ke LAN. |
+| `HUB_TOKEN` | *(kosong)* | Disarankan diset. Bila diisi, seluruh `/api/*` (kecuali `/api/health`) wajib `Authorization: Bearer <HUB_TOKEN>` atau `?token=<HUB_TOKEN>`. Bila kosong, API tetap berjalan dan hanya dapat dijangkau dari loopback. |
+
+> **Redaksi Otomatis**: Output tugas (`stdout`/`stderr`) dan teks error diredaksi sebelum ditulis ke berkas log, disimpan di SQLite, atau dikirim ke callback server. Pola token umum (OpenAI/Anthropic, Google, GitHub, AWS, Slack, JWT) dan baris `KEY=value`/`TOKEN=value`/`SECRET=value`/`PASSWORD=value` diganti penanda `[REDACTED...]`.
 
 > **PENTING Mengenai `PORT` pada Multi-Lane**:
 > `PORT` tidak didefinisikan di `.env.hub` bersama jika menjalankan beberapa lane. Nilai `PORT` di-set secara eksplisit per-unit systemd (mis. `Environment=PORT=4000`, `Environment=PORT=4002`) karena direktif `EnvironmentFile` dapat menimpa nilai `Environment=`.
