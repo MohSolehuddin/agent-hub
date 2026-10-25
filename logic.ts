@@ -1,4 +1,5 @@
-import { join } from "path";
+import { join, resolve } from "path";
+import { createHash } from "crypto";
 
 /**
  * logic.ts — logika MURNI agent-hub (tanpa I/O), supaya bisa diuji dengan `bun test`.
@@ -10,7 +11,226 @@ export type GateSpec = {
   name: string;
   commands: string[];
   source: "repo-config" | "builtin" | "heuristic";
+  rejected?: string[];
 };
+
+export const DEFAULT_ALLOWED_GATE_COMMANDS: string[] = [
+  "go build",
+  "go vet",
+  "go test",
+  "bun test",
+  "bun run build",
+  "bunx tsc --noEmit",
+  "npm test",
+  "npm run build",
+  "pnpm build",
+  "pnpm test",
+  "pnpm install --frozen-lockfile",
+  "npx tsc --noEmit",
+  "cargo test",
+  "cargo build",
+  "pytest",
+  "python -m pytest",
+];
+
+const DANGEROUS_SHELL_CHARS = /[;|&$`><(){}\\\r\n]/;
+
+export function parseGateCommands(raw: unknown): string[] {
+  const list = Array.isArray(raw)
+    ? raw
+    : typeof raw === "object" && raw !== null && Array.isArray((raw as any).gate)
+      ? (raw as any).gate
+      : null;
+
+  if (!list) return [];
+
+  const result: string[] = [];
+  for (const item of list) {
+    if (typeof item !== "string") continue;
+    const trimmed = item.trim();
+    if (!trimmed) continue;
+    if (trimmed.length > 200) continue;
+    if (DANGEROUS_SHELL_CHARS.test(trimmed)) continue;
+    result.push(trimmed);
+  }
+  return result;
+}
+
+export function isGateCommandAllowed(cmd: string, allow: string[] = DEFAULT_ALLOWED_GATE_COMMANDS): boolean {
+  if (typeof cmd !== "string") return false;
+  const normCmd = cmd.trim().replace(/\s+/g, " ");
+  if (!normCmd) return false;
+
+  for (const entry of allow) {
+    if (typeof entry !== "string") continue;
+    const normEntry = entry.trim().replace(/\s+/g, " ");
+    if (!normEntry) continue;
+    if (normCmd === normEntry || normCmd.startsWith(normEntry + " ")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function resolveGateConfig(
+  rawCfg: unknown,
+  allow: string[] = DEFAULT_ALLOWED_GATE_COMMANDS,
+): { commands: string[]; rejected: string[] } {
+  const commands: string[] = [];
+  const rejected: string[] = [];
+
+  const rawList = Array.isArray(rawCfg)
+    ? rawCfg
+    : typeof rawCfg === "object" && rawCfg !== null && Array.isArray((rawCfg as any).gate)
+      ? (rawCfg as any).gate
+      : null;
+
+  if (!rawList) {
+    return { commands, rejected };
+  }
+
+  for (const item of rawList) {
+    if (typeof item !== "string") continue;
+    const trimmed = item.trim();
+    if (!trimmed) continue;
+
+    const parsed = parseGateCommands([trimmed]);
+    if (parsed.length === 0) {
+      rejected.push(trimmed);
+      continue;
+    }
+
+    const cmd = parsed[0];
+    if (isGateCommandAllowed(cmd, allow)) {
+      commands.push(cmd);
+    } else {
+      rejected.push(trimmed);
+    }
+  }
+
+  return { commands, rejected };
+}
+
+export function isPathInsideAllowlist(target: string, prefixes: string[]): boolean {
+  if (!target || typeof target !== "string" || !target.trim()) return false;
+  if (!Array.isArray(prefixes) || prefixes.length === 0) return false;
+
+  const cleanPrefixes = prefixes
+    .filter((p) => typeof p === "string" && p.trim().length > 0)
+    .map((p) => {
+      const resolved = resolve(p.trim());
+      return resolved === "/" ? "/" : resolved.replace(/\/+$/, "");
+    });
+
+  if (cleanPrefixes.length === 0) return false;
+
+  const resolvedTarget = resolve(target.trim());
+  const normTarget = resolvedTarget === "/" ? "/" : resolvedTarget.replace(/\/+$/, "");
+
+  for (const prefix of cleanPrefixes) {
+    if (prefix === "/") return true;
+    if (normTarget === prefix || normTarget.startsWith(prefix + "/")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function parseAllowPrefixes(raw?: string): string[] {
+  if (!raw || typeof raw !== "string") return [];
+  return raw
+    .split(/[:\r\n]+/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+}
+
+export function resolveAllowedGateCommands(
+  extra?: string,
+  base: string[] = DEFAULT_ALLOWED_GATE_COMMANDS,
+): string[] {
+  const list = [...base];
+  if (extra && typeof extra === "string") {
+    const extras = extra
+      .split("|")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    for (const item of extras) {
+      if (!list.includes(item)) {
+        list.push(item);
+      }
+    }
+  }
+  return list;
+}
+
+export function splitCommand(cmd: string): string[] {
+  const args: string[] = [];
+  let current = "";
+  let inSingle = false;
+  let inDouble = false;
+
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i];
+    if (ch === "'" && !inDouble) {
+      inSingle = !inSingle;
+    } else if (ch === '"' && !inSingle) {
+      inDouble = !inDouble;
+    } else if (/\s/.test(ch) && !inSingle && !inDouble) {
+      if (current.length > 0) {
+        args.push(current);
+        current = "";
+      }
+    } else {
+      current += ch;
+    }
+  }
+  if (current.length > 0) {
+    args.push(current);
+  }
+  return args;
+}
+
+export function readGateConfigFingerprint(repoDir: string, io?: RepoFs): string | null {
+  const cfgPath = `${repoDir.replace(/\/+$/, "")}/.agent-hub.json`;
+  if (!io) return null;
+  if (!io.exists(cfgPath)) return null;
+
+  let content: string | null = null;
+  if (io.readText) {
+    try {
+      content = io.readText(cfgPath);
+    } catch {
+      return null;
+    }
+  } else if (io.readFile) {
+    try {
+      content = io.readFile(cfgPath);
+    } catch {
+      return null;
+    }
+  } else if (io.readJson) {
+    try {
+      content = JSON.stringify(io.readJson(cfgPath));
+    } catch {
+      return null;
+    }
+  }
+  if (content === null || content === undefined) return null;
+  return createHash("sha256").update(content).digest("hex");
+}
+
+export function resolveGateAfterRun(
+  gate: GateSpec | null,
+  before: string | null,
+  after: string | null,
+  fallback?: GateSpec | null,
+): GateSpec | null {
+  if (!gate) return null;
+  if (gate.source !== "repo-config") return gate;
+  if (before === after) return gate;
+  return fallback ?? null;
+}
 
 /** Gate bawaan per repo (nama folder repo). */
 const BUILTIN_GATES: Record<string, string[]> = {
@@ -187,18 +407,35 @@ export function collectDocsSections(dir: string, fs: RepoFs): DocSection[] {
  * Mengembalikan null kalau repo tidak punya gate (mis. repo data/docs) -> caller harus menandai
  * hasilnya "UNVERIFIED", bukan "COMPLETED".
  */
-export function detectGate(repoDir: string, repoName: string, io: RepoFs): GateSpec | null {
+export function detectGate(
+  repoDir: string,
+  repoName: string,
+  io: RepoFs,
+  options?: { ignoreRepoConfig?: boolean; allow?: string[] } | string[],
+): GateSpec | null {
+  const ignoreRepoConfig =
+    typeof options === "object" && !Array.isArray(options) ? options.ignoreRepoConfig : false;
+  const allow = Array.isArray(options)
+    ? options
+    : typeof options === "object" && options?.allow
+      ? options.allow
+      : DEFAULT_ALLOWED_GATE_COMMANDS;
+
   // 1. konfigurasi repo
-  const cfgPath = `${repoDir}/.agent-hub.json`;
-  if (io.exists(cfgPath) && io.readJson) {
-    try {
-      const cfg = io.readJson(cfgPath);
-      const cmds = Array.isArray(cfg?.gate) ? cfg.gate.filter((c: any) => typeof c === "string" && c.trim()) : [];
-      if (cmds.length > 0) {
-        return { name: repoName, commands: cmds, source: "repo-config" };
+  if (!ignoreRepoConfig) {
+    const cfgPath = `${repoDir}/.agent-hub.json`;
+    if (io.exists(cfgPath) && io.readJson) {
+      try {
+        const cfg = io.readJson(cfgPath);
+        const { commands, rejected } = resolveGateConfig(cfg, allow);
+        if (commands.length > 0) {
+          const spec: GateSpec = { name: repoName, commands, source: "repo-config" };
+          if (rejected.length > 0) spec.rejected = rejected;
+          return spec;
+        }
+      } catch {
+        // config rusak -> jatuh ke bawaan
       }
-    } catch {
-      // config rusak -> jatuh ke bawaan
     }
   }
 

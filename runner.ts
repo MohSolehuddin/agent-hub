@@ -34,6 +34,12 @@ import {
   resolveEngineModels,
   resolveOpencodeBin,
   buildEngineArgs,
+  isPathInsideAllowlist,
+  parseAllowPrefixes,
+  resolveAllowedGateCommands,
+  readGateConfigFingerprint,
+  resolveGateAfterRun,
+  splitCommand,
 } from "./logic";
 
 const execAsync = promisify(exec);
@@ -57,6 +63,8 @@ const BACKLOG_DIR = process.env.BACKLOG_DIR || join(HOME_DIR, "hermes-work/revie
 const POLL_MS = Number(process.env.POLL_MS || 10000);
 const LOG_DIR = resolveLogDir(process.env.LOG_DIR, process.cwd());
 const DASHBOARD_HTML_PATH = resolveDashboardPath(import.meta.dir);
+const PROJECT_ALLOW_PREFIXES = parseAllowPrefixes(process.env.PROJECT_ALLOW_PREFIXES);
+const ALLOWED_GATE_COMMANDS = resolveAllowedGateCommands(process.env.GATE_ALLOW_EXTRA);
 
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 
@@ -151,18 +159,51 @@ function firstFailingCmd(gate: GateSpec, out: string): string {
   return failed ?? gate.commands[0];
 }
 
+function runGateCommand(
+  cmd: string,
+  cwd: string,
+  timeoutMs: number = 10 * 60 * 1000,
+): Promise<CliRun> {
+  const argv = splitCommand(cmd);
+  if (argv.length === 0) {
+    return Promise.resolve({ code: 1, stdout: "", stderr: "Empty command", killed: false });
+  }
+
+  return new Promise((resolve) => {
+    const child = spawn(argv[0], argv.slice(1), { cwd, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    let killed = false;
+
+    const timer = setTimeout(() => {
+      killed = true;
+      log(`[!] timeout ${Math.round(timeoutMs / 60000)} menit -> SIGKILL gate ${cmd}`);
+      child.kill("SIGKILL");
+    }, timeoutMs);
+
+    child.stdout.on("data", (d) => (stdout += d.toString()));
+    child.stderr.on("data", (d) => (stderr += d.toString()));
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ code, stdout, stderr, killed });
+    });
+    child.on("error", (err: any) => {
+      clearTimeout(timer);
+      resolve({ code: 1, stdout, stderr: stderr + `\n[spawn error] ${err?.message ?? err}`, killed });
+    });
+  });
+}
+
 async function runGate(gate: GateSpec, cwd: string) {
   let out = "";
   let allOk = true;
   let failedCmd = "";
   for (const cmd of gate.commands) {
-    try {
-      const { stdout, stderr } = await execAsync(cmd, { cwd, maxBuffer: 8 * 1024 * 1024, timeout: 10 * 60 * 1000 });
-      out += `$ ${cmd}\n${stdout}${stderr}\n`;
-    } catch (err: any) {
+    const res = await runGateCommand(cmd, cwd, 10 * 60 * 1000);
+    out += `$ ${cmd}\n${res.stdout}${res.stderr}\n`;
+    if (res.code !== 0 || res.killed) {
       allOk = false;
       failedCmd = cmd;
-      out += `$ ${cmd}\n${err?.stdout ?? ""}${err?.stderr ?? err?.message ?? ""}\n`;
       break; // berhenti di kegagalan pertama
     }
   }
@@ -340,6 +381,20 @@ async function processLocalTasks() {
 
   log(`[⚙️] Mulai tugas lokal #${task.id} (server: ${task.server_task_id}) di ${targetProject}`);
 
+  if (PROJECT_ALLOW_PREFIXES.length > 0 && !isPathInsideAllowlist(targetProject, PROJECT_ALLOW_PREFIXES)) {
+    await finish(task, {
+      status: "FAILED",
+      exitCode: 1,
+      outputTail: "",
+      error: `project_path di luar allowlist: ${targetProject}`,
+      t0,
+      startedAt,
+      project: targetProject,
+    });
+    isRunning = false;
+    return;
+  }
+
   if (!fs.existsSync(targetProject)) {
     const hint = targetProject === DEFAULT_WORKSPACE
       ? ` (DEFAULT_WORKSPACE=${DEFAULT_WORKSPACE}). Set env DEFAULT_WORKSPACE atau buat foldernya.`
@@ -365,6 +420,13 @@ async function processLocalTasks() {
   } catch (e: any) {
     log(`[!] gagal mengambil git status awal: ${e?.message ?? e}`);
   }
+
+  const repoIo = {
+    exists: (p: string) => fs.existsSync(p),
+    readText: (p: string) => fs.readFileSync(p, "utf8"),
+    readJson: (p: string) => JSON.parse(fs.readFileSync(p, "utf8")),
+  };
+  const gateConfigBefore = readGateConfigFingerprint(targetProject, repoIo);
 
   let stdoutData = "";
   let stderrData = "";
@@ -410,10 +472,20 @@ async function processLocalTasks() {
     break; // error biasa
   }
 
-  const gate = detectGate(targetProject, basename(targetProject), {
-    exists: (p) => fs.existsSync(p),
-    readJson: (p) => JSON.parse(fs.readFileSync(p, "utf8")),
-  });
+  let gate = detectGate(targetProject, basename(targetProject), repoIo, ALLOWED_GATE_COMMANDS);
+  if (gate?.rejected && gate.rejected.length > 0) {
+    log(`[!] gate repo-config menolak ${gate.rejected.length} perintah: ${gate.rejected.join(", ")}`);
+  }
+
+  const gateConfigAfter = readGateConfigFingerprint(targetProject, repoIo);
+  if (gate?.source === "repo-config" && gateConfigBefore !== gateConfigAfter) {
+    log(`[!] .agent-hub.json berubah saat task berjalan -> gate repo-config diabaikan`);
+    const fallbackGate = detectGate(targetProject, basename(targetProject), repoIo, {
+      ignoreRepoConfig: true,
+      allow: ALLOWED_GATE_COMMANDS,
+    });
+    gate = resolveGateAfterRun(gate, gateConfigBefore, gateConfigAfter, fallbackGate);
+  }
 
   let gateResult: { ran: boolean; ok: boolean; summary: string; output: string } | null = null;
   if (gate && !killed && agyExitCode === 0) {
@@ -593,6 +665,12 @@ log(`   server: ${SERVER_URL} | agent: ${AGENT_NAME}`);
 log(`   engine: ${ENGINE} | model: ${MODELS.join(", ")} | print-timeout: ${PRINT_TIMEOUT}`);
 log(`   workspace: ${DEFAULT_WORKSPACE} | backlog: ${BACKLOG_DIR}`);
 log(`   token worker: ${WORKER_TOKEN ? "aktif" : "TIDAK diset (endpoint publik)"}`);
+if (PROJECT_ALLOW_PREFIXES.length === 0) {
+  log(`[!] PROJECT_ALLOW_PREFIXES kosong: worker menerima project_path apa pun`);
+} else {
+  log(`   workspace allowlist: ${PROJECT_ALLOW_PREFIXES.join(", ")}`);
+}
+log(`[i] gate allowlist: ${ALLOWED_GATE_COMMANDS.length} perintah diizinkan`);
 
 // Poller self-scheduling: jeda dihitung ulang setiap siklus sehingga kegagalan
 // (429/502/503/504/jaringan) memicu backoff eksponensial + jitter, bukan tembakan

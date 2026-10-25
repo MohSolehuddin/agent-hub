@@ -299,3 +299,12 @@ type LogEntryFields = {
 - `GET /api/backlog`: Mengembalikan daftar backlog item dari direktori `BACKLOG_DIR`.
 - `GET /api/health`: Mengembalikan status kesehatan worker `{ ok: true, agent, engine, models, running }`.
 - `GET /`: Menyajikan berkas static frontend `public/index.html`.
+
+---
+
+## 4. Keamanan: Gate & Path Safety
+
+- **Allowlist Perintah Gate**: Hanya perintah verifikasi di `DEFAULT_ALLOWED_GATE_COMMANDS` (atau tambahan via `GATE_ALLOW_EXTRA`) yang diizinkan dieksekusi. Karakter shell berbahaya (`;`, `|`, `&`, `$`, backtick, redirect, dll) ditolak.
+- **Eksekusi Tanpa Shell**: `runGateCommand` memecah argumen dan memanggil `spawn` langsung tanpa perantara shell untuk mencegah command injection.
+- **Guard Perubahan Config**: Fingerprint `.agent-hub.json` direkam sebelum dan sesudah tugas agen. Bila berkas berubah saat tugas berjalan, konfigurasi repo diabaikan dan diturunkan ke gate builtin/heuristik.
+- **Workspace Allowlist**: Jalur target tugas (`project_path`) divalidasi via `PROJECT_ALLOW_PREFIXES` menggunakan `isPathInsideAllowlist` untuk mencegah traversal ke direktori sensitif.
